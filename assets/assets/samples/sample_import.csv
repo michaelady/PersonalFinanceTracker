@@ -1,0 +1,4 @@
+date,amount,type,category,account,note,currency,visibility
+2026-08-01,42.50,expense,Groceries,Everyday checking,Market,USD,shared
+2026-08-02,15.99,expense,Subscriptions,Everyday checking,Stream+,USD,private
+2026-08-03,4200,income,Salary,Everyday checking,Paycheck,USD,shared

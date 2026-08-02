@@ -1,5 +1,4 @@
 import '../models/models.dart';
-import 'recurrence_period.dart';
 
 /// Pure finance calculations — unit-tested, no Flutter dependencies.
 abstract final class MoneyMath {

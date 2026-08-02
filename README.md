@@ -1,1 +1,49 @@
-# PersonalFinanceTracker
+# Zentho
+
+Personal finance tracker with household budgets, multi-currency conversion, shared + private sections, and an investments foresight area. One Flutter codebase for **Android**, **Windows**, and **Web**.
+
+## Highlights
+
+- Offline-first local storage (no cloud login in v1)
+- Same-device household profiles with **Shared** / **Private** visibility
+- Main currency + per-account / per-transaction currency with offline FX rates
+- Hybrid budgeting and **Available to spend**
+- Manual transactions + CSV import
+- Goals, recurring/subscription tracking, reports
+- Investments screen stub for upcoming portfolio features
+- Responsive UI (phone bottom nav / desktop rail) with widget + unit tests
+
+## Run
+
+```bash
+flutter pub get
+
+# Web
+flutter run -d chrome
+
+# Windows (on a Windows machine)
+flutter run -d windows
+
+# Android (device/emulator with Android SDK)
+flutter run -d android
+```
+
+## Test
+
+```bash
+flutter test
+```
+
+## CSV import format
+
+```csv
+date,amount,type,category,account,note,currency,visibility
+2026-08-01,42.50,expense,Groceries,Checking,Market,USD,shared
+```
+
+`type`: `income` | `expense`  
+`visibility`: `shared` | `private` (optional)
+
+## Brand
+
+Zentho — teal / mint light modern finance UI. App icon lives in `assets/branding/zentho_app_icon.png`.

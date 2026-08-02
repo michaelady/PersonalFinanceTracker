@@ -1,0 +1,279 @@
+import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../../data/repositories/finance_repository.dart';
+import '../../domain/models/models.dart';
+import '../../domain/services/money_math.dart';
+import '../../theme/zentho_colors.dart';
+import '../../widgets/money_text.dart';
+import '../../widgets/responsive.dart';
+import '../../widgets/visibility_chip.dart';
+
+class DashboardScreen extends StatelessWidget {
+  const DashboardScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final repo = context.watch<FinanceRepository>();
+    final available = repo.availableToSpend();
+    final currency = repo.settings.mainCurrency;
+    final month = MoneyMath.monthKey(DateTime.now());
+    final income = MoneyMath.incomeInMonthMain(
+      transactions: repo.visibleTransactions,
+      monthKeyValue: month,
+      mainCurrency: currency,
+      rates: repo.rates,
+    );
+    final expense = MoneyMath.expenseInMonthMain(
+      transactions: repo.visibleTransactions,
+      monthKeyValue: month,
+      mainCurrency: currency,
+      rates: repo.rates,
+    );
+    final recurring = MoneyMath.recurringCandidates(repo.visibleTransactions);
+    final recent = repo.visibleTransactions.take(5).toList();
+
+    return AppScaffoldBody(
+      child: ListView(
+        children: [
+          Text(
+            'Available to spend',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: ZenthoColors.inkMuted,
+                ),
+          ),
+          const SizedBox(height: 6),
+          TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: available),
+            duration: const Duration(milliseconds: 650),
+            curve: Curves.easeOutCubic,
+            builder: (context, value, _) => MoneyText(
+              value,
+              currencyCode: currency,
+              emphasize: true,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'This month’s calm number — income less budgets and overspend.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 24),
+          _HeroFlowChart(income: income, expense: expense),
+          const SizedBox(height: 28),
+          Row(
+            children: [
+              Expanded(
+                child: _MetricTile(
+                  label: 'Net worth',
+                  child: MoneyText(repo.netWorth, currencyCode: currency),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _MetricTile(
+                  label: 'Recurring',
+                  child: Text(
+                    '${recurring.length} tracked',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+          Text('Recent activity', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          if (recent.isEmpty)
+            Text(
+              'No transactions yet. Add one from Activity.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            )
+          else
+            ...recent.map((tx) => _TxRow(tx: tx, repo: repo)),
+          const SizedBox(height: 20),
+          Text(
+            'Investments preview',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              border: Border.all(color: ZenthoColors.line),
+              borderRadius: BorderRadius.circular(18),
+              gradient: LinearGradient(
+                colors: [
+                  Colors.white.withValues(alpha: 0.7),
+                  ZenthoColors.mint.withValues(alpha: 0.55),
+                ],
+              ),
+            ),
+            child: Text(
+              'Portfolio tracking is next — holdings, allocation, and performance will live here without changing your budgeting flow.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroFlowChart extends StatelessWidget {
+  const _HeroFlowChart({required this.income, required this.expense});
+
+  final double income;
+  final double expense;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxY = [income, expense, 1.0].reduce((a, b) => a > b ? a : b) * 1.2;
+    return SizedBox(
+      height: 190,
+      child: BarChart(
+        BarChartData(
+          maxY: maxY,
+          gridData: const FlGridData(show: false),
+          borderData: FlBorderData(show: false),
+          titlesData: FlTitlesData(
+            leftTitles:
+                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles:
+                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles:
+                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                getTitlesWidget: (value, _) {
+                  final label = value == 0 ? 'Income' : 'Spend';
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(label),
+                  );
+                },
+              ),
+            ),
+          ),
+          barGroups: [
+            BarChartGroupData(
+              x: 0,
+              barRods: [
+                BarChartRodData(
+                  toY: income,
+                  width: 42,
+                  borderRadius: BorderRadius.circular(12),
+                  color: ZenthoColors.teal,
+                ),
+              ],
+            ),
+            BarChartGroupData(
+              x: 1,
+              barRods: [
+                BarChartRodData(
+                  toY: expense,
+                  width: 42,
+                  borderRadius: BorderRadius.circular(12),
+                  color: ZenthoColors.amber,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MetricTile extends StatelessWidget {
+  const _MetricTile({required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: ZenthoColors.line.withValues(alpha: 0.9)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: 6),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _TxRow extends StatelessWidget {
+  const _TxRow({required this.tx, required this.repo});
+
+  final MoneyTransaction tx;
+  final FinanceRepository repo;
+
+  @override
+  Widget build(BuildContext context) {
+    final category = repo.categories
+        .where((c) => c.id == tx.categoryId)
+        .firstOrNull;
+    final signed =
+        tx.type == TransactionType.expense ? -tx.amount : tx.amount;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: ZenthoColors.mint,
+            child: Icon(
+              tx.type == TransactionType.income
+                  ? Icons.south_west
+                  : Icons.north_east,
+              color: ZenthoColors.tealDeep,
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  category?.name ?? tx.note.ifEmpty('Transaction'),
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    VisibilityChip(tx.visibility),
+                    if (tx.isRecurring) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        tx.recurringLabel ?? 'Recurring',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          MoneyText(signed, currencyCode: tx.currencyCode, signed: true),
+        ],
+      ),
+    );
+  }
+}
+
+extension on String {
+  String ifEmpty(String fallback) => trim().isEmpty ? fallback : this;
+}

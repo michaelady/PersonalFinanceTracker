@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../domain/models/models.dart';
+import '../../domain/services/csv_data_exchange.dart';
 import '../../domain/services/csv_import_service.dart';
 import '../../domain/services/money_math.dart';
 import '../../domain/services/recurrence_period.dart';
@@ -497,7 +498,33 @@ class FinanceRepository extends ChangeNotifier {
     await _persist();
   }
 
-  Future<CsvImportResult> importCsv(String csvBody) async {
+  CsvFullExportResult exportFullCsv({DateTime? exportedAt}) {
+    return CsvDataExchange.exportSnapshot(
+      snapshot,
+      exportedAt: exportedAt,
+    );
+  }
+
+  Future<void> replaceSnapshot(FinanceSnapshot next) async {
+    _hydrate(next);
+    _ensureSupportedCurrencies();
+    await _persist();
+    notifyListeners();
+  }
+
+  Future<CsvFullImportResult> importFullCsv(String csvBody) async {
+    final result = CsvDataExchange.importSnapshot(csvBody);
+    await replaceSnapshot(result.snapshot);
+    return result;
+  }
+
+  /// Auto-detects full multi-section export vs bank-style transaction CSV.
+  Future<CsvImportOutcome> importCsv(String csvBody) async {
+    if (CsvDataExchange.looksLikeFullExport(csvBody)) {
+      final full = await importFullCsv(csvBody);
+      return CsvImportOutcome.full(full);
+    }
+
     final result = CsvImportService.parse(
       csvBody: csvBody,
       accounts: accounts,
@@ -510,7 +537,7 @@ class FinanceRepository extends ChangeNotifier {
         ..sort((a, b) => b.date.compareTo(a.date));
       await _persist();
     }
-    return result;
+    return CsvImportOutcome.transactions(result);
   }
 
   List<Account> get visibleAccounts => MoneyMath.filterVisible(

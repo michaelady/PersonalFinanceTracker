@@ -1,6 +1,7 @@
 import 'package:csv/csv.dart';
 
 import '../models/models.dart';
+import 'csv_data_exchange.dart';
 
 class CsvImportResult {
   const CsvImportResult({
@@ -12,6 +13,28 @@ class CsvImportResult {
   final List<MoneyTransaction> transactions;
   final int skippedRows;
   final List<String> errors;
+}
+
+/// Result of Settings CSV import — either a full snapshot replace or
+/// a transaction append.
+class CsvImportOutcome {
+  const CsvImportOutcome._({
+    required this.isFullReplace,
+    this.transactions,
+    this.full,
+  });
+
+  factory CsvImportOutcome.transactions(CsvImportResult result) {
+    return CsvImportOutcome._(isFullReplace: false, transactions: result);
+  }
+
+  factory CsvImportOutcome.full(CsvFullImportResult result) {
+    return CsvImportOutcome._(isFullReplace: true, full: result);
+  }
+
+  final bool isFullReplace;
+  final CsvImportResult? transactions;
+  final CsvFullImportResult? full;
 }
 
 /// Expects headers: date,amount,type,category,account,note,currency,visibility

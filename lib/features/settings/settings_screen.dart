@@ -1,10 +1,14 @@
+import 'dart:convert';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../branding/zentho_logo.dart';
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
+import '../../domain/services/csv_data_exchange.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/responsive.dart';
 import '../accounts/accounts_screen.dart';
@@ -141,10 +145,20 @@ class SettingsScreen extends StatelessWidget {
               ),
               ListTile(
                 contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.download_outlined),
+                title: const Text('Export all data (CSV)'),
+                subtitle: const Text(
+                  'Full backup plus ledger/balances sheets for spreadsheet debugging',
+                ),
+                onTap: () => _exportCsv(context, repo),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.upload_file_outlined),
                 title: const Text('Import CSV'),
                 subtitle: const Text(
-                  'Columns: date,amount,type,category,account,note,currency,visibility',
+                  'Full Zentho export (replaces all) or bank CSV '
+                  '(date,amount,type,category,account,…)',
                 ),
                 onTap: () => _importCsv(context, repo),
               ),
@@ -245,6 +259,42 @@ class SettingsScreen extends StatelessWidget {
     controller.dispose();
   }
 
+  Future<void> _exportCsv(
+    BuildContext context,
+    FinanceRepository repo,
+  ) async {
+    try {
+      final exported = repo.exportFullCsv();
+      final bytes = utf8.encode(exported.csvBody);
+      final savedPath = await FilePicker.saveFile(
+        dialogTitle: 'Export Zentho data',
+        fileName: exported.fileName,
+        type: FileType.custom,
+        allowedExtensions: const ['csv'],
+        bytes: Uint8List.fromList(bytes),
+      );
+      if (!context.mounted) return;
+      if (savedPath == null) {
+        await Clipboard.setData(ClipboardData(text: exported.csvBody));
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Export copied to clipboard (save canceled)'),
+          ),
+        );
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Exported ${exported.fileName}')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export failed: $e')),
+      );
+    }
+  }
+
   Future<void> _importCsv(
     BuildContext context,
     FinanceRepository repo,
@@ -265,16 +315,60 @@ class SettingsScreen extends StatelessWidget {
         }
         return;
       }
-      final csvBody = String.fromCharCodes(bytes);
+      final csvBody = utf8.decode(bytes, allowMalformed: true);
+
+      if (CsvDataExchange.looksLikeFullExport(csvBody)) {
+        if (!context.mounted) return;
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Replace all data?'),
+            content: const Text(
+              'This file is a full Zentho export. Importing it will replace '
+              'settings, profiles, accounts, categories, transactions, '
+              'budgets, goals, and rates.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Replace'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+      }
+
       final importResult = await repo.importCsv(csvBody);
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Imported ${importResult.transactions.length}, skipped ${importResult.skippedRows}',
+      if (importResult.isFullReplace) {
+        final warningCount = importResult.full?.warnings.length ?? 0;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              warningCount == 0
+                  ? 'Full data import complete'
+                  : 'Full data import complete ($warningCount warning'
+                      '${warningCount == 1 ? '' : 's'})',
+            ),
           ),
-        ),
-      );
+        );
+      } else {
+        final tx = importResult.transactions!;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Imported ${tx.transactions.length} transaction'
+              '${tx.transactions.length == 1 ? '' : 's'}, '
+              'skipped ${tx.skippedRows}',
+            ),
+          ),
+        );
+      }
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

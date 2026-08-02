@@ -15,6 +15,14 @@ class TransactionsScreen extends StatelessWidget {
     BuildContext context,
     FinanceRepository repo,
   ) async {
+    await showEditor(context, repo);
+  }
+
+  static Future<void> showEditor(
+    BuildContext context,
+    FinanceRepository repo, {
+    MoneyTransaction? existing,
+  }) async {
     if (repo.accounts.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Add an account first in Settings.')),
@@ -29,7 +37,7 @@ class TransactionsScreen extends StatelessWidget {
         padding: EdgeInsets.only(
           bottom: MediaQuery.viewInsetsOf(context).bottom,
         ),
-        child: const _AddTransactionForm(),
+        child: _TransactionEditor(existing: existing),
       ),
     );
   }
@@ -46,7 +54,7 @@ class TransactionsScreen extends StatelessWidget {
           Text('Activity', style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 4),
           Text(
-            'Shared household spend and your private entries.',
+            'Tap any item to edit. Shared household spend and your private entries.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 16),
@@ -96,9 +104,7 @@ class TransactionsScreen extends StatelessWidget {
                             VisibilityChip(tx.visibility),
                           ],
                         ),
-                        onLongPress: () async {
-                          await repo.deleteTransaction(tx.id);
-                        },
+                        onTap: () => showEditor(context, repo, existing: tx),
                       );
                     },
                   ),
@@ -109,31 +115,55 @@ class TransactionsScreen extends StatelessWidget {
   }
 }
 
-class _AddTransactionForm extends StatefulWidget {
-  const _AddTransactionForm();
+class _TransactionEditor extends StatefulWidget {
+  const _TransactionEditor({this.existing});
+
+  final MoneyTransaction? existing;
 
   @override
-  State<_AddTransactionForm> createState() => _AddTransactionFormState();
+  State<_TransactionEditor> createState() => _TransactionEditorState();
 }
 
-class _AddTransactionFormState extends State<_AddTransactionForm> {
-  final _amount = TextEditingController();
-  final _note = TextEditingController();
-  TransactionType _type = TransactionType.expense;
-  VisibilityScope _visibility = VisibilityScope.shared;
+class _TransactionEditorState extends State<_TransactionEditor> {
+  late final TextEditingController _amount;
+  late final TextEditingController _note;
+  late TransactionType _type;
+  late VisibilityScope _visibility;
   String? _accountId;
   String? _categoryId;
-  bool _recurring = false;
+  late bool _recurring;
   late String _currency;
+  late DateTime _date;
+
+  bool get _isEditing => widget.existing != null;
 
   @override
   void initState() {
     super.initState();
     final repo = context.read<FinanceRepository>();
-    _accountId = repo.accounts.first.id;
-    _currency = repo.accounts.first.currencyCode;
-    final cats = repo.categories.where((c) => !c.isIncome).toList();
-    _categoryId = cats.isEmpty ? null : cats.first.id;
+    final existing = widget.existing;
+    _type = existing?.type ?? TransactionType.expense;
+    _visibility = existing?.visibility ?? VisibilityScope.shared;
+    _accountId = existing?.accountId ?? repo.accounts.first.id;
+    _currency = existing?.currencyCode ??
+        repo.accounts
+            .firstWhere(
+              (a) => a.id == _accountId,
+              orElse: () => repo.accounts.first,
+            )
+            .currencyCode;
+    final cats = repo.categories
+        .where(
+          (c) => _type == TransactionType.income ? c.isIncome : !c.isIncome,
+        )
+        .toList();
+    _categoryId = existing?.categoryId ?? (cats.isEmpty ? null : cats.first.id);
+    _recurring = existing?.isRecurring ?? false;
+    _date = existing?.date ?? DateTime.now();
+    _amount = TextEditingController(
+      text: existing == null ? '' : existing.amount.toString(),
+    );
+    _note = TextEditingController(text: existing?.note ?? '');
   }
 
   @override
@@ -141,6 +171,52 @@ class _AddTransactionFormState extends State<_AddTransactionForm> {
     _amount.dispose();
     _note.dispose();
     super.dispose();
+  }
+
+  Future<void> _save(FinanceRepository repo) async {
+    final amount = double.tryParse(_amount.text.trim());
+    if (amount == null ||
+        amount <= 0 ||
+        _accountId == null ||
+        _categoryId == null) {
+      return;
+    }
+
+    final note = _note.text.trim();
+    if (_isEditing) {
+      await repo.updateTransaction(
+        widget.existing!.copyWith(
+          type: _type,
+          amount: amount,
+          currencyCode: _currency,
+          accountId: _accountId,
+          categoryId: _categoryId,
+          date: _date,
+          visibility: _visibility,
+          note: note,
+          isRecurring: _recurring,
+          recurringLabel:
+              _recurring ? (note.isEmpty ? 'Recurring' : note) : null,
+        ),
+      );
+    } else {
+      await repo.addTransaction(
+        MoneyTransaction.create(
+          type: _type,
+          amount: amount,
+          currencyCode: _currency,
+          accountId: _accountId!,
+          categoryId: _categoryId,
+          date: _date,
+          ownerProfileId: repo.settings.activeProfileId,
+          visibility: _visibility,
+          note: note,
+          isRecurring: _recurring,
+          recurringLabel: _recurring ? (note.isEmpty ? 'Recurring' : note) : null,
+        ),
+      );
+    }
+    if (mounted) Navigator.pop(context);
   }
 
   @override
@@ -157,8 +233,10 @@ class _AddTransactionFormState extends State<_AddTransactionForm> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('New transaction',
-              style: Theme.of(context).textTheme.headlineSmall),
+          Text(
+            _isEditing ? 'Edit transaction' : 'New transaction',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
           const SizedBox(height: 16),
           SegmentedButton<TransactionType>(
             segments: const [
@@ -182,7 +260,9 @@ class _AddTransactionFormState extends State<_AddTransactionForm> {
                           : !c.isIncome,
                     )
                     .toList();
-                _categoryId = cats.isEmpty ? null : cats.first.id;
+                if (!cats.any((c) => c.id == _categoryId)) {
+                  _categoryId = cats.isEmpty ? null : cats.first.id;
+                }
               });
             },
           ),
@@ -204,8 +284,7 @@ class _AddTransactionFormState extends State<_AddTransactionForm> {
             onChanged: (v) {
               setState(() {
                 _accountId = v;
-                final account =
-                    repo.accounts.firstWhere((a) => a.id == v);
+                final account = repo.accounts.firstWhere((a) => a.id == v);
                 _currency = account.currencyCode;
               });
             },
@@ -213,7 +292,9 @@ class _AddTransactionFormState extends State<_AddTransactionForm> {
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             // ignore: deprecated_member_use
-            value: _categoryId,
+            value: categories.any((c) => c.id == _categoryId)
+                ? _categoryId
+                : (categories.isEmpty ? null : categories.first.id),
             decoration: const InputDecoration(labelText: 'Category'),
             items: [
               for (final c in categories)
@@ -222,6 +303,23 @@ class _AddTransactionFormState extends State<_AddTransactionForm> {
             onChanged: (v) => setState(() => _categoryId = v),
           ),
           const SizedBox(height: 12),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Date'),
+            subtitle: Text(
+              '${_date.year}-${_date.month.toString().padLeft(2, '0')}-${_date.day.toString().padLeft(2, '0')}',
+            ),
+            trailing: const Icon(Icons.calendar_today_outlined),
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _date,
+                firstDate: DateTime(2000),
+                lastDate: DateTime(2100),
+              );
+              if (picked != null) setState(() => _date = picked);
+            },
+          ),
           DropdownButtonFormField<VisibilityScope>(
             // ignore: deprecated_member_use
             value: _visibility,
@@ -253,32 +351,22 @@ class _AddTransactionFormState extends State<_AddTransactionForm> {
           ),
           const SizedBox(height: 20),
           FilledButton(
-            onPressed: () async {
-              final amount = double.tryParse(_amount.text.trim());
-              if (amount == null ||
-                  amount <= 0 ||
-                  _accountId == null ||
-                  _categoryId == null) {
-                return;
-              }
-              await repo.addTransaction(
-                MoneyTransaction.create(
-                  type: _type,
-                  amount: amount,
-                  currencyCode: _currency,
-                  accountId: _accountId!,
-                  categoryId: _categoryId,
-                  ownerProfileId: repo.settings.activeProfileId,
-                  visibility: _visibility,
-                  note: _note.text.trim(),
-                  isRecurring: _recurring,
-                  recurringLabel: _recurring ? _note.text.trim() : null,
-                ),
-              );
-              if (context.mounted) Navigator.pop(context);
-            },
-            child: const Text('Save'),
+            onPressed: () => _save(repo),
+            child: Text(_isEditing ? 'Save changes' : 'Save'),
           ),
+          if (_isEditing) ...[
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () async {
+                await repo.deleteTransaction(widget.existing!.id);
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: Text(
+                'Delete',
+                style: TextStyle(color: ZenthoColors.coral),
+              ),
+            ),
+          ],
         ],
       ),
     );

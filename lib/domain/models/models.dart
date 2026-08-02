@@ -2,6 +2,7 @@ import 'package:equatable/equatable.dart';
 import 'package:uuid/uuid.dart';
 
 const _uuid = Uuid();
+const Object _copyKeep = Object();
 
 enum VisibilityScope { shared, private }
 
@@ -320,7 +321,7 @@ class MoneyTransaction extends Equatable {
     String? transferAccountId,
     double? exchangeRateToMain,
     bool? isRecurring,
-    String? recurringLabel,
+    Object? recurringLabel = _copyKeep,
   }) {
     return MoneyTransaction(
       id: id,
@@ -336,7 +337,9 @@ class MoneyTransaction extends Equatable {
       transferAccountId: transferAccountId ?? this.transferAccountId,
       exchangeRateToMain: exchangeRateToMain ?? this.exchangeRateToMain,
       isRecurring: isRecurring ?? this.isRecurring,
-      recurringLabel: recurringLabel ?? this.recurringLabel,
+      recurringLabel: identical(recurringLabel, _copyKeep)
+          ? this.recurringLabel
+          : recurringLabel as String?,
     );
   }
 
@@ -434,13 +437,19 @@ class BudgetCategory extends Equatable {
     );
   }
 
-  BudgetCategory copyWith({double? allocated, bool? rollover}) {
+  BudgetCategory copyWith({
+    String? categoryId,
+    String? monthKey,
+    double? allocated,
+    VisibilityScope? visibility,
+    bool? rollover,
+  }) {
     return BudgetCategory(
       id: id,
-      categoryId: categoryId,
-      monthKey: monthKey,
+      categoryId: categoryId ?? this.categoryId,
+      monthKey: monthKey ?? this.monthKey,
       allocated: allocated ?? this.allocated,
-      visibility: visibility,
+      visibility: visibility ?? this.visibility,
       ownerProfileId: ownerProfileId,
       rollover: rollover ?? this.rollover,
     );
@@ -525,6 +534,8 @@ class SavingsGoal extends Equatable {
     String? name,
     double? targetAmount,
     double? currentAmount,
+    String? currencyCode,
+    VisibilityScope? visibility,
     GoalStatus? status,
     DateTime? targetDate,
   }) {
@@ -533,9 +544,9 @@ class SavingsGoal extends Equatable {
       name: name ?? this.name,
       targetAmount: targetAmount ?? this.targetAmount,
       currentAmount: currentAmount ?? this.currentAmount,
-      currencyCode: currencyCode,
+      currencyCode: currencyCode ?? this.currencyCode,
       ownerProfileId: ownerProfileId,
-      visibility: visibility,
+      visibility: visibility ?? this.visibility,
       status: status ?? this.status,
       targetDate: targetDate ?? this.targetDate,
     );

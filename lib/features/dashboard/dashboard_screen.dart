@@ -9,6 +9,7 @@ import '../../theme/zentho_colors.dart';
 import '../../widgets/money_text.dart';
 import '../../widgets/responsive.dart';
 import '../../widgets/visibility_chip.dart';
+import '../transactions/transactions_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -228,47 +229,51 @@ class _TxRow extends StatelessWidget {
         .firstOrNull;
     final signed =
         tx.type == TransactionType.expense ? -tx.amount : tx.amount;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        children: [
-          CircleAvatar(
-            backgroundColor: ZenthoColors.mint,
-            child: Icon(
-              tx.type == TransactionType.income
-                  ? Icons.south_west
-                  : Icons.north_east,
-              color: ZenthoColors.tealDeep,
-              size: 18,
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => TransactionsScreen.showEditor(context, repo, existing: tx),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            CircleAvatar(
+              backgroundColor: ZenthoColors.mint,
+              child: Icon(
+                tx.type == TransactionType.income
+                    ? Icons.south_west
+                    : Icons.north_east,
+                color: ZenthoColors.tealDeep,
+                size: 18,
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  category?.name ?? tx.note.ifEmpty('Transaction'),
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    VisibilityChip(tx.visibility),
-                    if (tx.isRecurring) ...[
-                      const SizedBox(width: 8),
-                      Text(
-                        tx.recurringLabel ?? 'Recurring',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    category?.name ?? tx.note.ifEmpty('Transaction'),
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      VisibilityChip(tx.visibility),
+                      if (tx.isRecurring) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          tx.recurringLabel ?? 'Recurring',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ],
                     ],
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
-          ),
-          MoneyText(signed, currencyCode: tx.currencyCode, signed: true),
-        ],
+            MoneyText(signed, currencyCode: tx.currencyCode, signed: true),
+          ],
+        ),
       ),
     );
   }

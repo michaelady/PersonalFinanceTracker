@@ -87,10 +87,8 @@ class SettingsScreen extends StatelessWidget {
                   contentPadding: EdgeInsets.zero,
                   title: Text(rate.code),
                   subtitle: Text(rate.rateToMain.toString()),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.edit_outlined),
-                    onPressed: () => _editRate(context, repo, rate),
-                  ),
+                  trailing: const Icon(Icons.edit_outlined),
+                  onTap: () => _editRate(context, repo, rate),
                 ),
               ),
               const SizedBox(height: 16),

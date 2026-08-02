@@ -335,9 +335,36 @@ class FinanceRepository extends ChangeNotifier {
     await _persist();
   }
 
+  Future<void> updateAccount(Account account) async {
+    accounts = [
+      for (final a in accounts)
+        if (a.id == account.id) account else a,
+    ];
+    if (!rates.any((r) => r.code == account.currencyCode)) {
+      rates = [
+        ...rates,
+        CurrencyRate(code: account.currencyCode, rateToMain: 1),
+      ];
+    }
+    await _persist();
+  }
+
+  Future<void> deleteAccount(String id) async {
+    accounts = accounts.where((a) => a.id != id).toList();
+    await _persist();
+  }
+
   Future<void> addTransaction(MoneyTransaction tx) async {
     transactions = [tx, ...transactions]
       ..sort((a, b) => b.date.compareTo(a.date));
+    await _persist();
+  }
+
+  Future<void> updateTransaction(MoneyTransaction tx) async {
+    transactions = [
+      for (final t in transactions)
+        if (t.id == tx.id) tx else t,
+    ]..sort((a, b) => b.date.compareTo(a.date));
     await _persist();
   }
 
@@ -347,6 +374,15 @@ class FinanceRepository extends ChangeNotifier {
   }
 
   Future<void> upsertBudget(BudgetCategory budget) async {
+    final byId = budgets.indexWhere((b) => b.id == budget.id);
+    if (byId >= 0) {
+      final copy = [...budgets];
+      copy[byId] = budget;
+      budgets = copy;
+      await _persist();
+      return;
+    }
+
     final existingIndex = budgets.indexWhere(
       (b) =>
           b.categoryId == budget.categoryId &&
@@ -356,11 +392,16 @@ class FinanceRepository extends ChangeNotifier {
     );
     if (existingIndex >= 0) {
       final copy = [...budgets];
-      copy[existingIndex] = budget.copyWith(allocated: budget.allocated);
+      copy[existingIndex] = budget;
       budgets = copy;
     } else {
       budgets = [...budgets, budget];
     }
+    await _persist();
+  }
+
+  Future<void> deleteBudget(String id) async {
+    budgets = budgets.where((b) => b.id != id).toList();
     await _persist();
   }
 
@@ -369,11 +410,24 @@ class FinanceRepository extends ChangeNotifier {
     await _persist();
   }
 
+  Future<void> updateGoal(SavingsGoal goal) async {
+    goals = [
+      for (final g in goals)
+        if (g.id == goal.id) goal else g,
+    ];
+    await _persist();
+  }
+
   Future<void> updateGoalProgress(String id, double currentAmount) async {
     goals = [
       for (final g in goals)
         if (g.id == id) g.copyWith(currentAmount: currentAmount) else g,
     ];
+    await _persist();
+  }
+
+  Future<void> deleteGoal(String id) async {
+    goals = goals.where((g) => g.id != id).toList();
     await _persist();
   }
 

@@ -1,0 +1,64 @@
+# zentho_export_v1
+# exported_at,2026-08-02T17:34:36.785Z
+# main_currency,CHF
+# tip,Import this file via Settings → Import CSV to replace all data. [ledger] and [account_balances] are ignored on import.
+
+[settings]
+mainCurrency,activeProfileId,onboardingComplete,showPrivate,showShared,householdCloudId,householdInviteKey,householdUpdatedAt
+CHF,d215f75a-62e8-4dd4-b898-27477305b3ce,true,false,true,,,
+
+[profiles]
+id,name,colorHex
+d215f75a-62e8-4dd4-b898-27477305b3ce,Adi,4278939246
+96fd5953-3f23-4d06-9c69-0e352c2297ec,Ralu,4293106478
+
+[accounts]
+id,name,type,currencyCode,openingBalance,ownerProfileId,visibility,includeInNetWorth,archived
+82c32cdf-c169-4351-bb90-4ae03dfd414e,Account,checking,CHF,0,d215f75a-62e8-4dd4-b898-27477305b3ce,shared,true,false
+
+[categories]
+id,name,iconName,colorHex,isIncome,isSystem
+b44f3216-7917-44a0-bdc9-f72bc926a16d,Salary,payments,4285509263,true,true
+8d39b909-4712-4431-8340-f23fc21c4638,Other Income,south_west,4282036137,true,true
+2e129d04-4a40-4cd2-a8ea-79b11cb00297,Housing,home,4278939246,false,true
+71902e7e-937e-46e3-945f-48c38f2bee4c,Groceries,local_grocery_store,4285509263,false,true
+aefaea80-0514-472c-b728-97a78eed7482,Dining,restaurant,4293106478,false,true
+5a105310-a050-41bb-84f9-263411640fc9,Transport,directions_car,4284246976,false,true
+87c00780-8395-48b4-9a1a-e7db4448dd8a,Subscriptions,subscriptions,4292438879,false,true
+f800c582-33a8-406e-b2b4-6974f17ea3c9,Health,favorite,4292438879,false,true
+6663197a-6229-4697-9552-69fe76a3674d,Fun,celebration,4293106478,false,true
+c9a7a795-bab8-4f76-8250-52dd925f56a5,Savings,savings,4279537551,false,true
+
+[transactions]
+id,date,amount,type,currencyCode,accountId,accountName,categoryId,categoryName,ownerProfileId,visibility,note,transferAccountId,exchangeRateToMain,isRecurring,recurringLabel,recurrencePeriod
+01c38183-4101-4f07-a57f-0fbc8187b642,2026-08-26T00:00:00.000,15.99,expense,CHF,82c32cdf-c169-4351-bb90-4ae03dfd414e,Account,87c00780-8395-48b4-9a1a-e7db4448dd8a,Subscriptions,d215f75a-62e8-4dd4-b898-27477305b3ce,private,Streaming,,,true,Streaming,monthly
+25d693f2-0717-4f27-84a9-f9a586cf0f9c,2026-08-26T00:00:00.000,86.4,expense,CHF,82c32cdf-c169-4351-bb90-4ae03dfd414e,Account,71902e7e-937e-46e3-945f-48c38f2bee4c,Groceries,d215f75a-62e8-4dd4-b898-27477305b3ce,shared,Market run,,,false,,monthly
+5a1cd44f-40e9-4e09-a5ce-058c416d2e0c,2026-07-25T00:00:00.000,9453,income,CHF,82c32cdf-c169-4351-bb90-4ae03dfd414e,Account,b44f3216-7917-44a0-bdc9-f72bc926a16d,Salary,d215f75a-62e8-4dd4-b898-27477305b3ce,shared,Monthly salary,,,true,Monthly salary,monthly
+
+[budgets]
+id,categoryId,categoryName,monthKey,allocated,visibility,ownerProfileId,rollover
+
+[goals]
+id,name,targetAmount,currentAmount,currencyCode,ownerProfileId,visibility,status,targetDate
+
+[rates]
+code,rateToMain,updatedAt
+USD,0.8101101749837978,2026-08-02T17:29:28.323Z
+EUR,0.9304056568663938,2026-08-02T17:29:28.323Z
+GBP,1.0872637919412007,2026-08-02T17:29:28.323Z
+JPY,0.005055611729019211,2026-08-02T17:29:28.323Z
+CAD,0.5769674590353104,2026-08-02T17:29:28.323Z
+AUD,0.5685371539030076,2026-08-02T17:29:28.323Z
+CHF,1,2026-08-02T17:29:28.323Z
+RON,0.1773301177471982,2026-08-02T17:29:28.323Z
+
+[ledger]
+date,type,amount,currencyCode,rateToMain,amountInMain,signedAmountInMain,accountName,categoryName,visibility,ownerProfileId,note,isRecurring,recurrencePeriod,transactionId
+2026-08-26T00:00:00.000,expense,15.99,CHF,1,15.99,-15.99,Account,Subscriptions,private,d215f75a-62e8-4dd4-b898-27477305b3ce,Streaming,true,monthly,01c38183-4101-4f07-a57f-0fbc8187b642
+2026-08-26T00:00:00.000,expense,86.4,CHF,1,86.4,-86.4,Account,Groceries,shared,d215f75a-62e8-4dd4-b898-27477305b3ce,Market run,false,monthly,25d693f2-0717-4f27-84a9-f9a586cf0f9c
+2026-07-25T00:00:00.000,income,9453,CHF,1,9453,9453,Account,Salary,shared,d215f75a-62e8-4dd4-b898-27477305b3ce,Monthly salary,true,monthly,5a1cd44f-40e9-4e09-a5ce-058c416d2e0c
+
+[account_balances]
+accountId,accountName,currencyCode,openingBalance,balanceNative,balanceInMain,includeInNetWorth,archived,visibility
+82c32cdf-c169-4351-bb90-4ae03dfd414e,Account,CHF,0,9350.61,9350.61,true,false,shared
+

@@ -1,4 +1,5 @@
 import '../models/models.dart';
+import 'recurrence_period.dart';
 
 /// Pure finance calculations — unit-tested, no Flutter dependencies.
 abstract final class MoneyMath {
@@ -209,8 +210,9 @@ abstract final class MoneyMath {
     required String monthKeyValue,
     required String mainCurrency,
     required List<CurrencyRate> rates,
+    bool includeExpectedRecurring = false,
   }) {
-    return transactions
+    final booked = transactions
         .where(
           (tx) =>
               tx.type == TransactionType.income &&
@@ -228,6 +230,15 @@ abstract final class MoneyMath {
                 overrideRate: tx.exchangeRateToMain,
               ),
         );
+    if (!includeExpectedRecurring) return booked;
+    return booked +
+        _expectedRecurringNotYetBooked(
+          transactions: transactions,
+          type: TransactionType.income,
+          monthKeyValue: monthKeyValue,
+          mainCurrency: mainCurrency,
+          rates: rates,
+        );
   }
 
   static double expenseInMonthMain({
@@ -235,8 +246,9 @@ abstract final class MoneyMath {
     required String monthKeyValue,
     required String mainCurrency,
     required List<CurrencyRate> rates,
+    bool includeExpectedRecurring = false,
   }) {
-    return transactions
+    final booked = transactions
         .where(
           (tx) =>
               tx.type == TransactionType.expense &&
@@ -254,6 +266,68 @@ abstract final class MoneyMath {
                 overrideRate: tx.exchangeRateToMain,
               ),
         );
+    if (!includeExpectedRecurring) return booked;
+    return booked +
+        _expectedRecurringNotYetBooked(
+          transactions: transactions,
+          type: TransactionType.expense,
+          monthKeyValue: monthKeyValue,
+          mainCurrency: mainCurrency,
+          rates: rates,
+        );
+  }
+
+  /// Recurring series key so July salary and its August occurrence match.
+  static String recurringSeriesKey(MoneyTransaction tx) {
+    final label = tx.recurringLabel?.trim();
+    if (label != null && label.isNotEmpty) {
+      return '${tx.type.name}|label|$label';
+    }
+    return [
+      tx.type.name,
+      tx.categoryId ?? '',
+      tx.amount.toString(),
+      tx.currencyCode,
+      tx.recurrencePeriod.name,
+    ].join('|');
+  }
+
+  /// Monthly-equivalent amount for recurring items of [type] that have no
+  /// booking in [monthKeyValue] yet (e.g. salary last booked in July).
+  static double _expectedRecurringNotYetBooked({
+    required List<MoneyTransaction> transactions,
+    required TransactionType type,
+    required String monthKeyValue,
+    required String mainCurrency,
+    required List<CurrencyRate> rates,
+  }) {
+    final recurring = transactions
+        .where((tx) => tx.isRecurring && tx.type == type)
+        .toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+
+    final bookedKeys = <String>{
+      for (final tx in transactions)
+        if (tx.type == type && monthKey(tx.date) == monthKeyValue)
+          recurringSeriesKey(tx),
+    };
+
+    final seen = <String>{};
+    var extra = 0.0;
+    for (final tx in recurring) {
+      final key = recurringSeriesKey(tx);
+      if (!seen.add(key)) continue; // latest template only
+      if (bookedKeys.contains(key)) continue;
+      final main = toMain(
+        amount: tx.amount,
+        currencyCode: tx.currencyCode,
+        mainCurrency: mainCurrency,
+        rates: rates,
+        overrideRate: tx.exchangeRateToMain,
+      );
+      extra += tx.recurrencePeriod.toMonthly(main);
+    }
+    return extra;
   }
 
   /// Hybrid available-to-spend for the month.
@@ -261,6 +335,9 @@ abstract final class MoneyMath {
   /// Intended envelope view:
   ///   remaining budgets + unallocated income − unbudgeted spending
   /// which simplifies to income − expenses (overspend is counted once).
+  ///
+  /// Income/expenses include expected recurring items for the month when the
+  /// last booking is in another month (e.g. July salary still counts in August).
   ///
   /// Earlier builds also subtracted a global "overspend vs allocated" term,
   /// which double-counted category overspend and understated available cash.
@@ -276,12 +353,14 @@ abstract final class MoneyMath {
       monthKeyValue: monthKeyValue,
       mainCurrency: mainCurrency,
       rates: rates,
+      includeExpectedRecurring: true,
     );
     final spent = expenseInMonthMain(
       transactions: transactions,
       monthKeyValue: monthKeyValue,
       mainCurrency: mainCurrency,
       rates: rates,
+      includeExpectedRecurring: true,
     );
 
     // Keep the envelope breakdown explicit so budget overspend / unbudgeted
@@ -310,9 +389,21 @@ abstract final class MoneyMath {
                 overrideRate: tx.exchangeRateToMain,
               ),
         );
-    final remainingBudgets = allocated - spentBudgeted;
+    // Expected recurring expenses in budgeted categories also consume budget.
+    final expectedBudgetedRecurring = _expectedRecurringNotYetBooked(
+      transactions: transactions.where((tx) {
+        return tx.categoryId != null &&
+            budgetedCategoryIds.contains(tx.categoryId);
+      }).toList(),
+      type: TransactionType.expense,
+      monthKeyValue: monthKeyValue,
+      mainCurrency: mainCurrency,
+      rates: rates,
+    );
+    final spentBudgetedTotal = spentBudgeted + expectedBudgetedRecurring;
+    final remainingBudgets = allocated - spentBudgetedTotal;
     final unallocatedIncome = income - allocated;
-    final unbudgetedSpending = spent - spentBudgeted;
+    final unbudgetedSpending = spent - spentBudgetedTotal;
     return remainingBudgets + unallocatedIncome - unbudgetedSpending;
   }
 

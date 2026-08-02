@@ -13,7 +13,13 @@ Personal finance tracker with household budgets, multi-currency conversion, shar
 - Investments screen stub for upcoming portfolio features
 - Responsive UI (phone bottom nav / desktop rail) with widget + unit tests
 
-## Run
+## Live web app
+
+https://michaelady.github.io/PersonalFinanceTracker/
+
+Deployed automatically via GitHub Actions (`.github/workflows/deploy-web.yml`) on pushes to `main`.
+
+## Run locally
 
 ```bash
 flutter pub get
@@ -27,6 +33,7 @@ flutter run -d windows
 # Android (device/emulator with Android SDK)
 flutter run -d android
 ```
+
 
 ## Test
 

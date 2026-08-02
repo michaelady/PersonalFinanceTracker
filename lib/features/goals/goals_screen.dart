@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
+import '../../domain/services/supported_currencies.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/money_text.dart';
 import '../../widgets/responsive.dart';
@@ -117,6 +118,8 @@ class GoalsScreen extends StatelessWidget {
       text: (existing?.currentAmount ?? 0).toString(),
     );
     var visibility = existing?.visibility ?? VisibilityScope.shared;
+    var currencyCode =
+        existing?.currencyCode ?? repo.settings.mainCurrency;
 
     final ok = await showDialog<String>(
       context: context,
@@ -131,12 +134,24 @@ class GoalsScreen extends StatelessWidget {
                 decoration: const InputDecoration(labelText: 'Name'),
               ),
               const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                // ignore: deprecated_member_use
+                value: currencyCode,
+                decoration: const InputDecoration(labelText: 'Currency'),
+                items: [
+                  for (final code in SupportedCurrencies.codes)
+                    DropdownMenuItem(value: code, child: Text(code)),
+                ],
+                onChanged: (v) =>
+                    setLocal(() => currencyCode = v ?? currencyCode),
+              ),
+              const SizedBox(height: 12),
               TextField(
                 controller: target,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
-                  labelText: 'Target (${repo.settings.mainCurrency})',
+                  labelText: 'Target ($currencyCode)',
                 ),
               ),
               if (isEditing) ...[
@@ -146,7 +161,7 @@ class GoalsScreen extends StatelessWidget {
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
-                    labelText: 'Current (${repo.settings.mainCurrency})',
+                    labelText: 'Current ($currencyCode)',
                   ),
                 ),
               ],
@@ -200,6 +215,7 @@ class GoalsScreen extends StatelessWidget {
             targetAmount: targetAmount,
             currentAmount: double.tryParse(current.text.trim()) ??
                 existing.currentAmount,
+            currencyCode: currencyCode,
             visibility: visibility,
           ),
         );
@@ -208,7 +224,7 @@ class GoalsScreen extends StatelessWidget {
           SavingsGoal.create(
             name: name.text.trim(),
             targetAmount: targetAmount,
-            currencyCode: repo.settings.mainCurrency,
+            currencyCode: currencyCode,
             ownerProfileId: repo.settings.activeProfileId,
             visibility: visibility,
           ),

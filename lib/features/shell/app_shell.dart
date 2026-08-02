@@ -118,7 +118,8 @@ class _AppShellState extends State<AppShell> {
               ),
         floatingActionButton: _index == 1
             ? FloatingActionButton.extended(
-                onPressed: () => TransactionsScreen.showAddSheet(context, repo),
+                onPressed: () =>
+                    TransactionsScreen.showAddActions(context, repo),
                 backgroundColor: ZenthoColors.tealDeep,
                 foregroundColor: Colors.white,
                 icon: const Icon(Icons.add),

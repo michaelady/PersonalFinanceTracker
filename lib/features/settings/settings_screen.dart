@@ -8,6 +8,7 @@ import '../../domain/models/models.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/responsive.dart';
 import '../accounts/accounts_screen.dart';
+import '../bills/bill_scan_flow.dart';
 import '../reports/reports_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -146,6 +147,15 @@ class SettingsScreen extends StatelessWidget {
                   'Columns: date,amount,type,category,account,note,currency,visibility',
                 ),
                 onTap: () => _importCsv(context, repo),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.document_scanner_outlined),
+                title: const Text('Scan bill or invoice'),
+                subtitle: const Text(
+                  'Photo or paste text, then add categorized expenses',
+                ),
+                onTap: () => BillScanFlow.start(context),
               ),
               const SizedBox(height: 24),
               Text(

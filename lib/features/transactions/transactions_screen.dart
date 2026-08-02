@@ -9,6 +9,7 @@ import '../../theme/zentho_colors.dart';
 import '../../widgets/money_text.dart';
 import '../../widgets/responsive.dart';
 import '../../widgets/visibility_chip.dart';
+import '../bills/bill_scan_flow.dart';
 
 class TransactionsScreen extends StatelessWidget {
   const TransactionsScreen({super.key});
@@ -18,6 +19,40 @@ class TransactionsScreen extends StatelessWidget {
     FinanceRepository repo,
   ) async {
     await showEditor(context, repo);
+  }
+
+  static Future<void> showAddActions(
+    BuildContext context,
+    FinanceRepository repo,
+  ) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.add),
+              title: const Text('Add manually'),
+              onTap: () => Navigator.pop(context, 'manual'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.document_scanner_outlined),
+              title: const Text('Scan bill or invoice'),
+              subtitle: const Text('Photo or paste text → auto-categorize'),
+              onTap: () => Navigator.pop(context, 'scan'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!context.mounted || choice == null) return;
+    if (choice == 'scan') {
+      await BillScanFlow.start(context);
+    } else {
+      await showAddSheet(context, repo);
+    }
   }
 
   static Future<void> showEditor(
@@ -58,6 +93,15 @@ class TransactionsScreen extends StatelessWidget {
           Text(
             'Tap any item to edit. Shared household spend and your private entries.',
             style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: () => BillScanFlow.start(context),
+              icon: const Icon(Icons.document_scanner_outlined),
+              label: const Text('Scan bill'),
+            ),
           ),
           const SizedBox(height: 16),
           Expanded(

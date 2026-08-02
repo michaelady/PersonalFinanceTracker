@@ -100,7 +100,7 @@ void main() {
 
   testWidgets('onboarding appears when incomplete', (tester) async {
     SharedPreferences.setMockInitialValues({});
-    final repo = FinanceRepository();
+    final repo = FinanceRepository(refreshRatesOnInit: false);
     await repo.init();
 
     await tester.pumpWidget(

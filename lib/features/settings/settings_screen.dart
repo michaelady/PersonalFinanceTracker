@@ -77,16 +77,42 @@ class SettingsScreen extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 12),
-              Text(
-                'Rates (1 unit → main currency). Editable offline.',
-                style: Theme.of(context).textTheme.bodyMedium,
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  repo.ratesRefreshing
+                      ? 'Refreshing exchange rates…'
+                      : 'Rates (1 unit → ${settings.mainCurrency})',
+                ),
+                subtitle: Text(
+                  [
+                    if (repo.ratesSource != null) 'Source: ${repo.ratesSource}',
+                    if (repo.ratesUpdatedAt != null)
+                      'Updated: ${repo.ratesUpdatedAt!.toLocal()}',
+                    if (repo.ratesError != null) repo.ratesError!,
+                    'Includes CHF & RON. Editable offline.',
+                  ].join('\n'),
+                ),
+                trailing: IconButton(
+                  tooltip: 'Refresh online',
+                  onPressed: repo.ratesRefreshing
+                      ? null
+                      : () => repo.refreshRatesOnline(),
+                  icon: repo.ratesRefreshing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.cloud_sync_outlined),
+                ),
               ),
               const SizedBox(height: 8),
               ...repo.rates.map(
                 (rate) => ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(rate.code),
-                  subtitle: Text(rate.rateToMain.toString()),
+                  subtitle: Text(rate.rateToMain.toStringAsFixed(6)),
                   trailing: const Icon(Icons.edit_outlined),
                   onTap: () => _editRate(context, repo, rate),
                 ),

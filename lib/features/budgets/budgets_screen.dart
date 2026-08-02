@@ -1,16 +1,26 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
+import '../../domain/services/budget_forecast.dart';
 import '../../domain/services/money_math.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/money_text.dart';
 import '../../widgets/responsive.dart';
 import '../../widgets/visibility_chip.dart';
 
-class BudgetsScreen extends StatelessWidget {
+class BudgetsScreen extends StatefulWidget {
   const BudgetsScreen({super.key});
+
+  @override
+  State<BudgetsScreen> createState() => _BudgetsScreenState();
+}
+
+class _BudgetsScreenState extends State<BudgetsScreen> {
+  ForecastHorizon _horizon = ForecastHorizon.y1;
 
   @override
   Widget build(BuildContext context) {
@@ -20,6 +30,14 @@ class BudgetsScreen extends StatelessWidget {
         repo.visibleBudgets.where((b) => b.monthKey == month).toList();
     final expenseCategories =
         repo.categories.where((c) => !c.isIncome).toList();
+    final forecast = BudgetForecast.project(
+      accounts: repo.visibleAccounts,
+      transactions: repo.visibleTransactions,
+      budgets: budgets,
+      mainCurrency: repo.settings.mainCurrency,
+      rates: repo.rates,
+      horizon: _horizon,
+    );
 
     return AppScaffoldBody(
       child: ListView(
@@ -27,10 +45,48 @@ class BudgetsScreen extends StatelessWidget {
           Text('Budgets', style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 4),
           Text(
-            'Tap a budget to edit. Hybrid envelopes for $month.',
+            'Tap a budget to edit. Forecasts use your current cash-flow pace.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
+          _PredictionCards(
+            currency: repo.settings.mainCurrency,
+            endOfMonth: forecast.endOfMonthBalance,
+            endOfYear: forecast.endOfYearBalance,
+            monthlyNet: forecast.monthlyNet,
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Total prediction',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final h in ForecastHorizon.values)
+                ChoiceChip(
+                  label: Text(h.label),
+                  selected: _horizon == h,
+                  selectedColor: ZenthoColors.mint,
+                  labelStyle: TextStyle(
+                    color: _horizon == h
+                        ? ZenthoColors.tealDeep
+                        : ZenthoColors.inkMuted,
+                    fontWeight:
+                        _horizon == h ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                  onSelected: (_) => setState(() => _horizon = h),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _ForecastChart(
+            series: forecast.series,
+            currency: repo.settings.mainCurrency,
+          ),
+          const SizedBox(height: 24),
           Align(
             alignment: Alignment.centerLeft,
             child: FilledButton.tonal(
@@ -232,5 +288,191 @@ class BudgetsScreen extends StatelessWidget {
       await repo.deleteBudget(existing.id);
     }
     amountController.dispose();
+  }
+}
+
+class _PredictionCards extends StatelessWidget {
+  const _PredictionCards({
+    required this.currency,
+    required this.endOfMonth,
+    required this.endOfYear,
+    required this.monthlyNet,
+  });
+
+  final String currency;
+  final double endOfMonth;
+  final double endOfYear;
+  final double monthlyNet;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _PredictTile(
+                label: 'End of month',
+                child: MoneyText(endOfMonth, currencyCode: currency),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _PredictTile(
+                label: 'End of year',
+                child: MoneyText(endOfYear, currencyCode: currency),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _PredictTile(
+          label: 'Projected monthly net',
+          child: MoneyText(monthlyNet, currencyCode: currency, signed: true),
+        ),
+      ],
+    );
+  }
+}
+
+class _PredictTile extends StatelessWidget {
+  const _PredictTile({required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        border: Border.all(color: ZenthoColors.line),
+        borderRadius: BorderRadius.circular(16),
+        color: Colors.white.withValues(alpha: 0.55),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: 6),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _ForecastChart extends StatelessWidget {
+  const _ForecastChart({required this.series, required this.currency});
+
+  final List<ForecastPoint> series;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context) {
+    if (series.length < 2) {
+      return const SizedBox(
+        height: 180,
+        child: Center(child: Text('Not enough data to chart yet.')),
+      );
+    }
+
+    final minY = series.map((e) => e.balance).reduce((a, b) => a < b ? a : b);
+    final maxY = series.map((e) => e.balance).reduce((a, b) => a > b ? a : b);
+    final pad = ((maxY - minY).abs() * 0.12).clamp(1.0, double.infinity);
+    final format = DateFormat.yMMMd();
+
+    return Container(
+      height: 240,
+      padding: const EdgeInsets.fromLTRB(8, 12, 12, 8),
+      decoration: BoxDecoration(
+        border: Border.all(color: ZenthoColors.line),
+        borderRadius: BorderRadius.circular(16),
+        color: Colors.white.withValues(alpha: 0.45),
+      ),
+      child: LineChart(
+        LineChartData(
+          minY: minY - pad,
+          maxY: maxY + pad,
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: false,
+            getDrawingHorizontalLine: (_) => FlLine(
+              color: ZenthoColors.line.withValues(alpha: 0.7),
+              strokeWidth: 1,
+            ),
+          ),
+          borderData: FlBorderData(show: false),
+          titlesData: FlTitlesData(
+            topTitles:
+                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles:
+                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 48,
+                getTitlesWidget: (value, _) => Text(
+                  NumberFormat.compact().format(value),
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              ),
+            ),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 28,
+                interval: (series.length / 3).clamp(1, series.length).toDouble(),
+                getTitlesWidget: (value, meta) {
+                  final i = value.round();
+                  if (i < 0 || i >= series.length) {
+                    return const SizedBox.shrink();
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      format.format(series[i].date),
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          lineTouchData: LineTouchData(
+            touchTooltipData: LineTouchTooltipData(
+              getTooltipItems: (spots) => spots
+                  .map(
+                    (s) => LineTooltipItem(
+                      '$currency ${s.y.toStringAsFixed(0)}\n${format.format(series[s.x.toInt()].date)}',
+                      const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+          lineBarsData: [
+            LineChartBarData(
+              spots: [
+                for (var i = 0; i < series.length; i++)
+                  FlSpot(i.toDouble(), series[i].balance),
+              ],
+              isCurved: true,
+              color: ZenthoColors.tealDeep,
+              barWidth: 3,
+              dotData: FlDotData(show: series.length <= 14),
+              belowBarData: BarAreaData(
+                show: true,
+                color: ZenthoColors.tealSoft.withValues(alpha: 0.18),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

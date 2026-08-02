@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../branding/zentho_logo.dart';
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
+import '../../domain/services/supported_currencies.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/responsive.dart';
 import 'package:provider/provider.dart';
@@ -22,7 +23,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   String _currency = 'USD';
   bool _busy = false;
 
-  static const _currencies = ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD'];
+  static const _currencies = SupportedCurrencies.codes;
 
   @override
   void dispose() {

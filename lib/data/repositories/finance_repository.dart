@@ -3,15 +3,28 @@ import 'package:flutter/foundation.dart';
 import '../../domain/models/models.dart';
 import '../../domain/services/csv_import_service.dart';
 import '../../domain/services/money_math.dart';
+import '../../domain/services/supported_currencies.dart';
 import '../persistence/local_store.dart';
+import '../services/fx_rate_service.dart';
 
 class FinanceRepository extends ChangeNotifier {
-  FinanceRepository({LocalStore? store}) : _store = store ?? LocalStore();
+  FinanceRepository({
+    LocalStore? store,
+    FxRateService? fxService,
+    this.refreshRatesOnInit = true,
+  })  : _store = store ?? LocalStore(),
+        _fx = fxService ?? FxRateService();
 
   final LocalStore _store;
+  final FxRateService _fx;
+  final bool refreshRatesOnInit;
 
   bool loading = true;
   String? error;
+  bool ratesRefreshing = false;
+  String? ratesSource;
+  DateTime? ratesUpdatedAt;
+  String? ratesError;
 
   late AppSettings settings;
   List<HouseholdProfile> profiles = [];
@@ -33,12 +46,18 @@ class FinanceRepository extends ChangeNotifier {
       } else {
         _hydrate(existing);
       }
+      _ensureSupportedCurrencies();
     } catch (e) {
       error = e.toString();
       _seedEmpty();
     } finally {
       loading = false;
       notifyListeners();
+    }
+
+    // Online refresh at startup; keep offline defaults if it fails.
+    if (refreshRatesOnInit) {
+      await refreshRatesOnline();
     }
   }
 
@@ -63,17 +82,61 @@ class FinanceRepository extends ChangeNotifier {
       activeProfileId: you.id,
       onboardingComplete: false,
     );
-    rates = [
-      const CurrencyRate(code: 'USD', rateToMain: 1),
-      const CurrencyRate(code: 'EUR', rateToMain: 1.08),
-      const CurrencyRate(code: 'GBP', rateToMain: 1.27),
-      const CurrencyRate(code: 'JPY', rateToMain: 0.0067),
-    ];
+    rates = FxRateService.defaultRatesFor('USD');
+    ratesSource = 'offline defaults (2026-08-02)';
+    ratesUpdatedAt = DateTime.now().toUtc();
     categories = _defaultCategories();
     accounts = [];
     transactions = [];
     budgets = [];
     goals = [];
+  }
+
+  void _ensureSupportedCurrencies() {
+    final defaults = FxRateService.defaultRatesFor(settings.mainCurrency);
+    final byCode = {for (final r in rates) r.code: r};
+    for (final fallback in defaults) {
+      byCode.putIfAbsent(fallback.code, () => fallback);
+    }
+    // Keep main at 1.
+    byCode[settings.mainCurrency] = CurrencyRate(
+      code: settings.mainCurrency,
+      rateToMain: 1,
+      updatedAt: byCode[settings.mainCurrency]?.updatedAt,
+    );
+    rates = [
+      for (final code in SupportedCurrencies.codes)
+        if (byCode.containsKey(code)) byCode[code]!,
+    ];
+  }
+
+  Future<bool> refreshRatesOnline() async {
+    ratesRefreshing = true;
+    ratesError = null;
+    notifyListeners();
+    try {
+      final result = await _fx.fetchRates(mainCurrency: settings.mainCurrency);
+      final byCode = {for (final r in result.rates) r.code: r};
+      // Preserve any custom currencies not in the feed.
+      for (final existing in rates) {
+        byCode.putIfAbsent(existing.code, () => existing);
+      }
+      rates = [
+        for (final code in SupportedCurrencies.codes)
+          if (byCode.containsKey(code)) byCode[code]!,
+      ];
+      ratesSource = result.source;
+      ratesUpdatedAt = result.fetchedAt;
+      await _persist();
+      return true;
+    } catch (e) {
+      ratesError = 'Could not refresh online — using saved/offline rates.';
+      notifyListeners();
+      return false;
+    } finally {
+      ratesRefreshing = false;
+      notifyListeners();
+    }
   }
 
   List<SpendCategory> _defaultCategories() {
@@ -186,16 +249,9 @@ class FinanceRepository extends ChangeNotifier {
       activeProfileId: you.id,
       onboardingComplete: true,
     );
-    rates = [
-      CurrencyRate(code: mainCurrency, rateToMain: 1),
-      ...rates.where((r) => r.code != mainCurrency),
-    ];
-    if (!rates.any((r) => r.code == starterAccount.currencyCode)) {
-      rates = [
-        ...rates,
-        CurrencyRate(code: starterAccount.currencyCode, rateToMain: 1),
-      ];
-    }
+    rates = FxRateService.defaultRatesFor(mainCurrency);
+    ratesSource = 'offline defaults (2026-08-02)';
+    ratesUpdatedAt = DateTime.now().toUtc();
     accounts = [
       Account(
         id: starterAccount.id,
@@ -210,6 +266,7 @@ class FinanceRepository extends ChangeNotifier {
     ];
     await loadDemoExtras(you.id);
     await _persist();
+    await refreshRatesOnline();
   }
 
   Future<void> loadDemoExtras(String ownerId) async {
@@ -302,15 +359,10 @@ class FinanceRepository extends ChangeNotifier {
 
   Future<void> setMainCurrency(String code) async {
     settings = settings.copyWith(mainCurrency: code);
-    if (!rates.any((r) => r.code == code)) {
-      rates = [...rates, CurrencyRate(code: code, rateToMain: 1)];
-    } else {
-      rates = [
-        for (final r in rates)
-          if (r.code == code) CurrencyRate(code: code, rateToMain: 1) else r,
-      ];
-    }
+    rates = FxRateService.defaultRatesFor(code);
+    ratesSource = 'offline defaults (awaiting refresh)';
     await _persist();
+    await refreshRatesOnline();
   }
 
   Future<void> upsertRate(CurrencyRate rate) async {

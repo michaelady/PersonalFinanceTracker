@@ -5,6 +5,7 @@ import '../../branding/zentho_logo.dart';
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
 import '../../domain/services/money_math.dart';
+import '../../domain/services/supported_currencies.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/money_text.dart';
 import '../../widgets/responsive.dart';
@@ -85,7 +86,7 @@ class AccountsScreen extends StatelessWidget {
     var type = existing?.type ?? AccountType.checking;
     var currency = existing?.currencyCode ?? repo.settings.mainCurrency;
     var visibility = existing?.visibility ?? VisibilityScope.shared;
-    const currencies = ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD'];
+    const currencies = SupportedCurrencies.codes;
 
     final ok = await showDialog<String>(
       context: context,

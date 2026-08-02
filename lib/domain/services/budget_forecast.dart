@@ -30,6 +30,7 @@ class ForecastPoint {
 class BudgetForecastSummary {
   const BudgetForecastSummary({
     required this.endOfMonthBalance,
+    required this.endOfPeriodBalance,
     required this.endOfYearBalance,
     required this.monthlyNet,
     required this.dailyNet,
@@ -38,6 +39,9 @@ class BudgetForecastSummary {
   });
 
   final double endOfMonthBalance;
+  /// Balance at the end of the selected prediction horizon.
+  final double endOfPeriodBalance;
+  /// Balance at the end of the current calendar year.
   final double endOfYearBalance;
   final double monthlyNet;
   final double dailyNet;
@@ -98,6 +102,7 @@ abstract final class BudgetForecast {
     var balance = current;
     double? endOfMonthBalance;
     double? endOfYearBalance;
+    double? endOfPeriodBalance;
     final series = <ForecastPoint>[ForecastPoint(date: asOf, balance: balance)];
     var nextSample = recurrence.addTo(asOf);
 
@@ -113,13 +118,14 @@ abstract final class BudgetForecast {
         }
       }
 
-      if (day == monthEnd) endOfMonthBalance = balance;
-      if (day == yearEnd) endOfYearBalance = balance;
+      if (_sameDay(day, monthEnd)) endOfMonthBalance = balance;
+      if (_sameDay(day, yearEnd)) endOfYearBalance = balance;
+      if (_sameDay(day, horizonEnd)) endOfPeriodBalance = balance;
 
-      final onHorizonEnd = day == horizonEnd || day.isAtSameMomentAs(horizonEnd);
+      final onHorizonEnd = _sameDay(day, horizonEnd);
       if ((!day.isBefore(nextSample) && !day.isAfter(horizonEnd)) ||
           onHorizonEnd) {
-        if (!series.any((p) => p.date == day)) {
+        if (!series.any((p) => _sameDay(p.date, day))) {
           series.add(ForecastPoint(date: day, balance: balance));
         }
         while (!nextSample.isAfter(day)) {
@@ -129,14 +135,19 @@ abstract final class BudgetForecast {
     }
 
     // Ensure final horizon point exists.
-    if (series.last.date != horizonEnd && !horizonEnd.isBefore(asOf)) {
-      // Re-simulate only to horizon if sim went further — use last known at/before.
+    if (!_sameDay(series.last.date, horizonEnd) && !horizonEnd.isBefore(asOf)) {
       final atHorizon = series.lastWhere(
         (p) => !p.date.isAfter(horizonEnd),
         orElse: () => series.first,
       );
-      if (atHorizon.date != horizonEnd) {
-        series.add(ForecastPoint(date: horizonEnd, balance: atHorizon.balance));
+      endOfPeriodBalance ??= atHorizon.balance;
+      if (!_sameDay(atHorizon.date, horizonEnd)) {
+        series.add(
+          ForecastPoint(
+            date: horizonEnd,
+            balance: endOfPeriodBalance,
+          ),
+        );
       }
     }
 
@@ -155,14 +166,19 @@ abstract final class BudgetForecast {
     ];
 
     return BudgetForecastSummary(
-      endOfMonthBalance: endOfMonthBalance ?? balance,
-      endOfYearBalance: endOfYearBalance ?? balance,
+      endOfMonthBalance: endOfMonthBalance ?? current,
+      endOfPeriodBalance: endOfPeriodBalance ?? clipped.last.balance,
+      // Never fall back to horizon/sim end — that mislabeled "year" as period.
+      endOfYearBalance: endOfYearBalance ?? endOfMonthBalance ?? current,
       monthlyNet: monthlyNet,
       dailyNet: monthlyNet / daysInMonth,
       recurringNetPerPeriod: recurringNetPerPeriod,
       series: _downsample(clipped, maxPoints: 180),
     );
   }
+
+  static bool _sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
 
   static List<ForecastPoint> _downsample(
     List<ForecastPoint> points, {

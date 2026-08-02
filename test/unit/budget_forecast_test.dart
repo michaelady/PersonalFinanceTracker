@@ -70,6 +70,57 @@ void main() {
       expect(summary.monthlyNet, isNot(0));
     });
 
+    test('end of period follows horizon, not calendar year', () {
+      final owner = 'p1';
+      final account = Account.create(
+        name: 'Checking',
+        type: AccountType.checking,
+        currencyCode: 'USD',
+        ownerProfileId: owner,
+        visibility: VisibilityScope.shared,
+        openingBalance: 1000,
+      );
+      final salary = SpendCategory.create(
+        name: 'Salary',
+        iconName: 'pay',
+        colorHex: 1,
+        isIncome: true,
+      );
+      final asOf = DateTime(2026, 8, 2);
+      final txs = [
+        MoneyTransaction.create(
+          type: TransactionType.income,
+          amount: 1000,
+          currencyCode: 'USD',
+          accountId: account.id,
+          categoryId: salary.id,
+          ownerProfileId: owner,
+          visibility: VisibilityScope.shared,
+          date: DateTime(2026, 7, 2),
+          isRecurring: true,
+          recurrencePeriod: RecurrencePeriod.monthly,
+        ),
+      ];
+      final rates = FxRateService.defaultRatesFor('USD');
+
+      final summary = BudgetForecast.project(
+        accounts: [account],
+        transactions: txs,
+        budgets: const [],
+        mainCurrency: 'USD',
+        rates: rates,
+        horizon: ForecastHorizon.y30,
+        recurrence: RecurrencePeriod.monthly,
+        now: asOf,
+      );
+
+      expect(summary.series.last.date.year, greaterThan(2026));
+      expect(summary.endOfPeriodBalance, summary.series.last.balance);
+      // Calendar year-end must be much smaller than a 30-year horizon.
+      expect(summary.endOfYearBalance, lessThan(summary.endOfPeriodBalance));
+      expect(summary.endOfYearBalance, lessThan(20000));
+    });
+
     test('applies recurring transactions by cadence', () {
       final owner = 'p1';
       final account = Account.create(

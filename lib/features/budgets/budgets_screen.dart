@@ -55,6 +55,8 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           _PredictionCards(
             currency: repo.settings.mainCurrency,
             endOfMonth: forecast.endOfMonthBalance,
+            endOfPeriod: forecast.endOfPeriodBalance,
+            periodLabel: _horizon.label,
             endOfYear: forecast.endOfYearBalance,
             monthlyNet: forecast.monthlyNet,
             recurringNetPerPeriod: forecast.recurringNetPerPeriod,
@@ -311,6 +313,8 @@ class _PredictionCards extends StatelessWidget {
   const _PredictionCards({
     required this.currency,
     required this.endOfMonth,
+    required this.endOfPeriod,
+    required this.periodLabel,
     required this.endOfYear,
     required this.monthlyNet,
     required this.recurringNetPerPeriod,
@@ -319,6 +323,8 @@ class _PredictionCards extends StatelessWidget {
 
   final String currency;
   final double endOfMonth;
+  final double endOfPeriod;
+  final String periodLabel;
   final double endOfYear;
   final double monthlyNet;
   final double recurringNetPerPeriod;
@@ -339,11 +345,16 @@ class _PredictionCards extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: _PredictTile(
-                label: 'End of year',
-                child: MoneyText(endOfYear, currencyCode: currency),
+                label: 'End of period ($periodLabel)',
+                child: MoneyText(endOfPeriod, currencyCode: currency),
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 8),
+        _PredictTile(
+          label: 'End of calendar year',
+          child: MoneyText(endOfYear, currencyCode: currency),
         ),
         const SizedBox(height: 8),
         _PredictTile(

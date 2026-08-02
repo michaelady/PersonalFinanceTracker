@@ -581,6 +581,7 @@ class FinanceRepository extends ChangeNotifier {
         transactions: visibleTransactions,
         mainCurrency: settings.mainCurrency,
         rates: rates,
+        asOf: DateTime.now(),
       );
 
   double availableToSpend([DateTime? date]) {

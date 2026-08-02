@@ -57,7 +57,8 @@ class DashboardScreen extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'This month’s calm number — income less budgets and overspend.',
+            'This month’s calm number — income minus expenses '
+            '(budget overspend counted once).',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 24),

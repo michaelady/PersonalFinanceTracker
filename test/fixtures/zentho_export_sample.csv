@@ -1,0 +1,79 @@
+# zentho_export_v1
+# exported_at,2026-08-02T14:34:25.380Z
+# main_currency,CHF
+# tip,Import this file via Settings → Import CSV to replace all data. [ledger] and [account_balances] are ignored on import.
+
+[settings]
+mainCurrency,activeProfileId,onboardingComplete,showPrivate,showShared
+CHF,411ed94d-b315-4daa-a985-a2e9a52ff03d,true,true,true
+
+[profiles]
+id,name,colorHex
+411ed94d-b315-4daa-a985-a2e9a52ff03d,You,4278939246
+9636b637-c5ae-47cf-8198-458d6e7ed424,Ralu,4293106478
+
+[accounts]
+id,name,type,currencyCode,openingBalance,ownerProfileId,visibility,includeInNetWorth,archived
+6072030d-db45-4487-b727-7f0a9a4a6ebb,Main account,checking,EUR,2500,411ed94d-b315-4daa-a985-a2e9a52ff03d,shared,true,false
+
+[categories]
+id,name,iconName,colorHex,isIncome,isSystem
+78b9b7b4-c587-4f93-a4c5-bddbbcd90f74,Salary,payments,4285509263,true,true
+e72f75ba-a69e-46e5-9d5f-58596fafd0df,Other Income,south_west,4282036137,true,true
+cf742a13-2d2b-4973-b277-ce28de077b3e,Housing,home,4278939246,false,true
+0804ff22-19c7-499a-9fc4-2cc100fdf8a5,Groceries,local_grocery_store,4285509263,false,true
+1be9fbd9-3b8d-4521-a4ba-6d3b1938db4a,Dining,restaurant,4293106478,false,true
+1f35e85a-0505-426b-b6f8-ba8bb2d93136,Transport,directions_car,4284246976,false,true
+bf8345a4-6633-409b-8af7-3bf42f8b2bbd,Subscriptions,subscriptions,4292438879,false,true
+998c73c3-b36f-43e8-a9fe-1bd46357b1f7,Health,favorite,4292438879,false,true
+9da1fb1f-a7d2-415c-a807-d2d4bab9950c,Fun,celebration,4293106478,false,true
+6a1e3a82-e75e-459a-b37d-47de359462be,Savings,savings,4279537551,false,true
+
+[transactions]
+id,date,amount,type,currencyCode,accountId,accountName,categoryId,categoryName,ownerProfileId,visibility,note,transferAccountId,exchangeRateToMain,isRecurring,recurringLabel,recurrencePeriod
+088f9b8e-133c-43f8-9246-251db4f21c3d,2026-08-05T00:00:00.000,15.99,expense,CHF,6072030d-db45-4487-b727-7f0a9a4a6ebb,Main account,bf8345a4-6633-409b-8af7-3bf42f8b2bbd,Subscriptions,411ed94d-b315-4daa-a985-a2e9a52ff03d,private,Streaming,,,true,Streaming,monthly
+2c78f3b9-aa4d-4c57-a21a-84647d37a7cb,2026-08-03T00:00:00.000,86.4,expense,EUR,6072030d-db45-4487-b727-7f0a9a4a6ebb,Main account,0804ff22-19c7-499a-9fc4-2cc100fdf8a5,Groceries,411ed94d-b315-4daa-a985-a2e9a52ff03d,shared,Market run,,,false,,monthly
+775322e8-d2c6-494f-8555-2ae491a9259e,2026-08-02T16:33:29.171,1300,expense,CHF,6072030d-db45-4487-b727-7f0a9a4a6ebb,Main account,998c73c3-b36f-43e8-a9fe-1bd46357b1f7,Health,411ed94d-b315-4daa-a985-a2e9a52ff03d,shared,Asig sanatate,,,true,Asig sanatate,monthly
+62b5eb1a-988e-4110-8a72-5e88c3cfa343,2026-08-02T16:32:49.273,1982,expense,CHF,6072030d-db45-4487-b727-7f0a9a4a6ebb,Main account,cf742a13-2d2b-4973-b277-ce28de077b3e,Housing,411ed94d-b315-4daa-a985-a2e9a52ff03d,shared,Chirie,,,true,Chirie,monthly
+891f5155-e7a5-4308-b1bc-23cca664b875,2026-08-02T15:21:01.458,663,expense,EUR,6072030d-db45-4487-b727-7f0a9a4a6ebb,Main account,cf742a13-2d2b-4973-b277-ce28de077b3e,Housing,411ed94d-b315-4daa-a985-a2e9a52ff03d,shared,,,,false,,monthly
+49dee2a8-4fc0-41a5-8d50-514bc319ca33,2026-08-02T13:38:33.684,9453,income,CHF,6072030d-db45-4487-b727-7f0a9a4a6ebb,Main account,78b9b7b4-c587-4f93-a4c5-bddbbcd90f74,Salary,411ed94d-b315-4daa-a985-a2e9a52ff03d,shared,,,,true,Recurring,monthly
+2b7a31a8-7f99-4b07-8615-66a91f5fae5d,2026-08-02T13:37:47.756,200,expense,EUR,6072030d-db45-4487-b727-7f0a9a4a6ebb,Main account,1f35e85a-0505-426b-b6f8-ba8bb2d93136,Transport,411ed94d-b315-4daa-a985-a2e9a52ff03d,shared,Baterie masina,,,false,,monthly
+9c937509-2964-4c89-97d1-8daca1ebef61,2026-07-07T00:00:00.000,399,expense,EUR,6072030d-db45-4487-b727-7f0a9a4a6ebb,Main account,998c73c3-b36f-43e8-a9fe-1bd46357b1f7,Health,411ed94d-b315-4daa-a985-a2e9a52ff03d,shared,AS.L.VCO. A.S.L. Verbano-Cusio-Ossola · €,,,false,,monthly
+
+[budgets]
+id,categoryId,categoryName,monthKey,allocated,visibility,ownerProfileId,rollover
+5d53302e-cb73-455d-b407-660ccd7145be,0804ff22-19c7-499a-9fc4-2cc100fdf8a5,Groceries,2026-08,450,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,true
+009d917a-2b30-4616-b241-3bbecc3ce7b3,bf8345a4-6633-409b-8af7-3bf42f8b2bbd,Subscriptions,2026-08,80,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,true
+a24b8e62-b499-4993-b180-7dcfd18987be,cf742a13-2d2b-4973-b277-ce28de077b3e,Housing,2026-08,100,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,true
+
+[goals]
+id,name,targetAmount,currentAmount,currencyCode,ownerProfileId,visibility,status,targetDate
+a97f7639-500b-44dc-ba6e-7334b7de9b3a,Emergency fund,5000,1200,CHF,411ed94d-b315-4daa-a985-a2e9a52ff03d,shared,active,
+ed029e70-b58c-4fd7-aa34-5f048408d0a6,Vacation,5000,50,CHF,411ed94d-b315-4daa-a985-a2e9a52ff03d,shared,active,
+
+[rates]
+code,rateToMain,updatedAt
+USD,0.8101101749837978,2026-08-02T14:33:43.404Z
+EUR,0.9304056568663938,2026-08-02T14:33:43.404Z
+GBP,1.0872637919412007,2026-08-02T14:33:43.404Z
+JPY,0.005055611729019211,2026-08-02T14:33:43.404Z
+CAD,0.5769674590353104,2026-08-02T14:33:43.404Z
+AUD,0.5685371539030076,2026-08-02T14:33:43.404Z
+CHF,1,2026-08-02T14:33:43.404Z
+RON,0.1773301177471982,2026-08-02T14:33:43.404Z
+
+[ledger]
+date,type,amount,currencyCode,rateToMain,amountInMain,signedAmountInMain,accountName,categoryName,visibility,ownerProfileId,note,isRecurring,recurrencePeriod,transactionId
+2026-08-05T00:00:00.000,expense,15.99,CHF,1,15.99,-15.99,Main account,Subscriptions,private,411ed94d-b315-4daa-a985-a2e9a52ff03d,Streaming,true,monthly,088f9b8e-133c-43f8-9246-251db4f21c3d
+2026-08-03T00:00:00.000,expense,86.4,EUR,0.9304056568663938,80.38704875325642,-80.38704875325642,Main account,Groceries,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,Market run,false,monthly,2c78f3b9-aa4d-4c57-a21a-84647d37a7cb
+2026-08-02T16:33:29.171,expense,1300,CHF,1,1300,-1300,Main account,Health,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,Asig sanatate,true,monthly,775322e8-d2c6-494f-8555-2ae491a9259e
+2026-08-02T16:32:49.273,expense,1982,CHF,1,1982,-1982,Main account,Housing,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,Chirie,true,monthly,62b5eb1a-988e-4110-8a72-5e88c3cfa343
+2026-08-02T15:21:01.458,expense,663,EUR,0.9304056568663938,616.858950502419,-616.858950502419,Main account,Housing,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,,false,monthly,891f5155-e7a5-4308-b1bc-23cca664b875
+2026-08-02T13:38:33.684,income,9453,CHF,1,9453,9453,Main account,Salary,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,,true,monthly,49dee2a8-4fc0-41a5-8d50-514bc319ca33
+2026-08-02T13:37:47.756,expense,200,EUR,0.9304056568663938,186.08113137327877,-186.08113137327877,Main account,Transport,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,Baterie masina,false,monthly,2b7a31a8-7f99-4b07-8615-66a91f5fae5d
+2026-07-07T00:00:00.000,expense,399,EUR,0.9304056568663938,371.2318570896911,-371.2318570896911,Main account,Health,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,AS.L.VCO. A.S.L. Verbano-Cusio-Ossola · €,false,monthly,9c937509-2964-4c89-97d1-8daca1ebef61
+
+[account_balances]
+accountId,accountName,currencyCode,openingBalance,balanceInMain,includeInNetWorth,archived,visibility
+6072030d-db45-4487-b727-7f0a9a4a6ebb,Main account,EUR,2500,7226.465154447338,true,false,shared
+

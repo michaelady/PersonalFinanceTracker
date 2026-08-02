@@ -73,6 +73,7 @@ abstract final class BudgetForecast {
       transactions: transactions,
       mainCurrency: mainCurrency,
       rates: rates,
+      asOf: asOf,
     );
 
     final nonRecurringDaily = _nonRecurringDailyNet(

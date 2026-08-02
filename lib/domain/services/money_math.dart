@@ -61,16 +61,29 @@ abstract final class MoneyMath {
     );
   }
 
-  /// Opening balance + incomes − expenses ± transfers, converted to main currency.
-  static double balanceForAccount({
+  /// Opening balance + incomes − expenses ± transfers, in the account's currency.
+  ///
+  /// Foreign-currency transactions are converted via [mainCurrency] as a bridge.
+  /// Optional [asOf] excludes transactions dated after that day (inclusive cut-off
+  /// uses calendar date only).
+  static double balanceNativeForAccount({
     required Account account,
     required List<MoneyTransaction> transactions,
     required String mainCurrency,
     required List<CurrencyRate> rates,
+    DateTime? asOf,
   }) {
     var balanceNative = account.openingBalance;
+    final asOfDay = asOf == null
+        ? null
+        : DateTime(asOf.year, asOf.month, asOf.day);
 
     for (final tx in transactions) {
+      if (asOfDay != null) {
+        final txDay = DateTime(tx.date.year, tx.date.month, tx.date.day);
+        if (txDay.isAfter(asOfDay)) continue;
+      }
+
       final touchesAccount =
           tx.accountId == account.id || tx.transferAccountId == account.id;
       if (!touchesAccount) continue;
@@ -105,8 +118,26 @@ abstract final class MoneyMath {
       }
     }
 
+    return balanceNative;
+  }
+
+  /// Opening balance + incomes − expenses ± transfers, converted to main currency.
+  static double balanceForAccount({
+    required Account account,
+    required List<MoneyTransaction> transactions,
+    required String mainCurrency,
+    required List<CurrencyRate> rates,
+    DateTime? asOf,
+  }) {
+    final native = balanceNativeForAccount(
+      account: account,
+      transactions: transactions,
+      mainCurrency: mainCurrency,
+      rates: rates,
+      asOf: asOf,
+    );
     return toMain(
-      amount: balanceNative,
+      amount: native,
       currencyCode: account.currencyCode,
       mainCurrency: mainCurrency,
       rates: rates,
@@ -118,6 +149,7 @@ abstract final class MoneyMath {
     required List<MoneyTransaction> transactions,
     required String mainCurrency,
     required List<CurrencyRate> rates,
+    DateTime? asOf,
   }) {
     return accounts
         .where((a) => !a.archived && a.includeInNetWorth)
@@ -130,6 +162,7 @@ abstract final class MoneyMath {
                 transactions: transactions,
                 mainCurrency: mainCurrency,
                 rates: rates,
+                asOf: asOf,
               ),
         );
   }
@@ -223,7 +256,14 @@ abstract final class MoneyMath {
         );
   }
 
-  /// Hybrid available-to-spend: remaining budget envelopes + unallocated income.
+  /// Hybrid available-to-spend for the month.
+  ///
+  /// Intended envelope view:
+  ///   remaining budgets + unallocated income − unbudgeted spending
+  /// which simplifies to income − expenses (overspend is counted once).
+  ///
+  /// Earlier builds also subtracted a global "overspend vs allocated" term,
+  /// which double-counted category overspend and understated available cash.
   static double availableToSpend({
     required List<MoneyTransaction> transactions,
     required List<BudgetCategory> budgets,
@@ -237,10 +277,6 @@ abstract final class MoneyMath {
       mainCurrency: mainCurrency,
       rates: rates,
     );
-    final allocated = totalBudgetAllocated(
-      budgets: budgets,
-      monthKeyValue: monthKeyValue,
-    );
     final spent = expenseInMonthMain(
       transactions: transactions,
       monthKeyValue: monthKeyValue,
@@ -248,22 +284,36 @@ abstract final class MoneyMath {
       rates: rates,
     );
 
-    final remainingBudgets = budgets
-        .where((b) => b.monthKey == monthKeyValue)
-        .fold<double>(0, (sum, b) {
-      final used = spentInCategoryMain(
-        categoryId: b.categoryId,
-        monthKeyValue: monthKeyValue,
-        transactions: transactions,
-        mainCurrency: mainCurrency,
-        rates: rates,
-      );
-      return sum + (b.allocated - used);
-    });
-
+    // Keep the envelope breakdown explicit so budget overspend / unbudgeted
+    // spend stay auditable in tests without changing the result.
+    final monthBudgets =
+        budgets.where((b) => b.monthKey == monthKeyValue).toList();
+    final allocated = monthBudgets.fold<double>(0, (sum, b) => sum + b.allocated);
+    final budgetedCategoryIds = monthBudgets.map((b) => b.categoryId).toSet();
+    final spentBudgeted = transactions
+        .where(
+          (tx) =>
+              tx.type == TransactionType.expense &&
+              monthKey(tx.date) == monthKeyValue &&
+              tx.categoryId != null &&
+              budgetedCategoryIds.contains(tx.categoryId),
+        )
+        .fold<double>(
+          0,
+          (sum, tx) =>
+              sum +
+              toMain(
+                amount: tx.amount,
+                currencyCode: tx.currencyCode,
+                mainCurrency: mainCurrency,
+                rates: rates,
+                overrideRate: tx.exchangeRateToMain,
+              ),
+        );
+    final remainingBudgets = allocated - spentBudgeted;
     final unallocatedIncome = income - allocated;
-    final overspend = spent > allocated ? spent - allocated : 0;
-    return remainingBudgets + unallocatedIncome - overspend;
+    final unbudgetedSpending = spent - spentBudgeted;
+    return remainingBudgets + unallocatedIncome - unbudgetedSpending;
   }
 
   static List<MoneyTransaction> recurringCandidates(

@@ -306,6 +306,7 @@ abstract final class CsvDataExchange {
         'accountName',
         'currencyCode',
         'openingBalance',
+        'balanceNative',
         'balanceInMain',
         'includeInNetWorth',
         'archived',
@@ -318,6 +319,12 @@ abstract final class CsvDataExchange {
             a.name,
             a.currencyCode,
             a.openingBalance,
+            MoneyMath.balanceNativeForAccount(
+              account: a,
+              transactions: snapshot.transactions,
+              mainCurrency: main,
+              rates: snapshot.rates,
+            ),
             MoneyMath.balanceForAccount(
               account: a,
               transactions: snapshot.transactions,

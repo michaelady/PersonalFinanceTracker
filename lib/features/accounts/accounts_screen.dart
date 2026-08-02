@@ -39,9 +39,16 @@ class AccountsScreen extends StatelessWidget {
                   separatorBuilder: (_, _) => const Divider(),
                   itemBuilder: (context, index) {
                     final account = accounts[index];
-                    final balance = MoneyMath.balanceForAccount(
+                    final balanceNative = MoneyMath.balanceNativeForAccount(
                       account: account,
                       transactions: repo.visibleTransactions,
+                      mainCurrency: repo.settings.mainCurrency,
+                      rates: repo.rates,
+                      asOf: DateTime.now(),
+                    );
+                    final balanceMain = MoneyMath.toMain(
+                      amount: balanceNative,
+                      currencyCode: account.currencyCode,
                       mainCurrency: repo.settings.mainCurrency,
                       rates: repo.rates,
                     );
@@ -56,9 +63,18 @@ class AccountsScreen extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           MoneyText(
-                            balance,
-                            currencyCode: repo.settings.mainCurrency,
+                            balanceNative,
+                            currencyCode: account.currencyCode,
                           ),
+                          if (account.currencyCode !=
+                              repo.settings.mainCurrency) ...[
+                            const SizedBox(height: 2),
+                            MoneyText(
+                              balanceMain,
+                              currencyCode: repo.settings.mainCurrency,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
                           const SizedBox(height: 4),
                           VisibilityChip(account.visibility),
                         ],

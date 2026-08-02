@@ -14,6 +14,7 @@ import '../../widgets/responsive.dart';
 import '../accounts/accounts_screen.dart';
 import '../bills/bill_scan_flow.dart';
 import '../reports/reports_screen.dart';
+import '../user/user_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -33,6 +34,22 @@ class SettingsScreen extends StatelessWidget {
               const ZenthoWordmark(showTagline: true, compact: true),
               const SizedBox(height: 24),
               Text('Household', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.person_outline),
+                title: const Text('User & sharing'),
+                subtitle: Text(
+                  settings.householdSharingEnabled
+                      ? 'Household sharing on · manage invite link'
+                      : 'Profile, invite link, clear all data',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const UserScreen()),
+                ),
+              ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
                 // ignore: deprecated_member_use
@@ -171,15 +188,60 @@ class SettingsScreen extends StatelessWidget {
                 ),
                 onTap: () => BillScanFlow.start(context),
               ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.delete_forever_outlined,
+                    color: Colors.red.shade700),
+                title: const Text('Clear all data'),
+                subtitle: const Text(
+                  'Wipe this device and return to setup',
+                ),
+                onTap: () => _clearAll(context, repo),
+              ),
               const SizedBox(height: 24),
               Text(
-                'Offline-first · local auth only · investments roadmap ready',
+                'Offline-first · share household by invite link · '
+                'investments roadmap ready',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _clearAll(
+    BuildContext context,
+    FinanceRepository repo,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear all data?'),
+        content: const Text(
+          'This permanently removes all Zentho data on this device and '
+          'returns you to setup. Export a CSV first if you might need it.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Clear all'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await repo.clearAllData();
+    if (!context.mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('All data cleared')),
     );
   }
 

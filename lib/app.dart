@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'data/repositories/finance_repository.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/shell/app_shell.dart';
+import 'features/user/household_join_gate.dart';
 import 'theme/zentho_theme.dart';
 
 class ZenthoApp extends StatelessWidget {
@@ -23,9 +24,10 @@ class ZenthoApp extends StatelessWidget {
             );
           }
           if (!repo.settings.onboardingComplete) {
-            return const OnboardingScreen();
+            // Still wrap so an invite link can jump straight into a household.
+            return const HouseholdJoinGate(child: OnboardingScreen());
           }
-          return const AppShell();
+          return const HouseholdJoinGate(child: AppShell());
         },
       ),
     );

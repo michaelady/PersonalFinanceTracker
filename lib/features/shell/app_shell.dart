@@ -13,6 +13,7 @@ import '../investments/investments_screen.dart';
 import '../reports/reports_screen.dart';
 import '../settings/settings_screen.dart';
 import '../transactions/transactions_screen.dart';
+import '../user/user_screen.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -64,6 +65,11 @@ class _AppShellState extends State<AppShell> {
                   child: const Text('Reports'),
                 ),
               ],
+              IconButton(
+                tooltip: 'User',
+                onPressed: () => _openExtra(context, const UserScreen()),
+                icon: const Icon(Icons.person_outline),
+              ),
               IconButton(
                 tooltip: 'Settings',
                 onPressed: () => _openExtra(context, const SettingsScreen()),

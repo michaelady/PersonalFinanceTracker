@@ -192,8 +192,156 @@ void main() {
       // Same underlying monthly bill; normalized recurring net differs by selector.
       expect(monthly.recurringNetPerPeriod, closeTo(-10, 0.01));
       expect(weekly.recurringNetPerPeriod.abs(), lessThan(10));
-      // Over a year, monthly recurrence should debit about 12 times.
-      expect(monthly.series.last.balance, closeTo(-120, 15));
+      // July bill already in the ledger (-10) + 12 projected months = -130.
+      expect(monthly.series.last.balance, closeTo(-130, 0.01));
+    });
+
+    test('sums each income and expense by its own recurrence over the period', () {
+      final owner = 'p1';
+      final account = Account.create(
+        name: 'Checking',
+        type: AccountType.checking,
+        currencyCode: 'USD',
+        ownerProfileId: owner,
+        visibility: VisibilityScope.shared,
+        openingBalance: 1000,
+      );
+      final salary = SpendCategory.create(
+        name: 'Salary',
+        iconName: 'pay',
+        colorHex: 1,
+        isIncome: true,
+      );
+      final food = SpendCategory.create(
+        name: 'Food',
+        iconName: 'food',
+        colorHex: 1,
+        isIncome: false,
+      );
+      final tax = SpendCategory.create(
+        name: 'Tax',
+        iconName: 'tax',
+        colorHex: 1,
+        isIncome: false,
+      );
+      final asOf = DateTime(2026, 8, 2);
+      final txs = [
+        MoneyTransaction.create(
+          type: TransactionType.income,
+          amount: 3000,
+          currencyCode: 'USD',
+          accountId: account.id,
+          categoryId: salary.id,
+          ownerProfileId: owner,
+          visibility: VisibilityScope.shared,
+          date: DateTime(2026, 8, 1),
+          isRecurring: true,
+          recurrencePeriod: RecurrencePeriod.monthly,
+        ),
+        MoneyTransaction.create(
+          type: TransactionType.expense,
+          amount: 50,
+          currencyCode: 'USD',
+          accountId: account.id,
+          categoryId: food.id,
+          ownerProfileId: owner,
+          visibility: VisibilityScope.shared,
+          date: DateTime(2026, 8, 1),
+          isRecurring: true,
+          recurrencePeriod: RecurrencePeriod.weekly,
+        ),
+        MoneyTransaction.create(
+          type: TransactionType.expense,
+          amount: 600,
+          currencyCode: 'USD',
+          accountId: account.id,
+          categoryId: tax.id,
+          ownerProfileId: owner,
+          visibility: VisibilityScope.shared,
+          date: DateTime(2026, 1, 1),
+          isRecurring: true,
+          recurrencePeriod: RecurrencePeriod.year,
+        ),
+      ];
+
+      final summary = BudgetForecast.project(
+        accounts: [account],
+        transactions: txs,
+        budgets: const [],
+        mainCurrency: 'USD',
+        rates: FxRateService.defaultRatesFor('USD'),
+        horizon: ForecastHorizon.y1,
+        recurrence: RecurrencePeriod.monthly,
+        now: asOf,
+      );
+
+      // Opening 1000 + already-booked Aug salary 3000 + weekly 50 + yearly 600.
+      final current = 1000 + 3000 - 50 - 600;
+      final weeklyPerYear = 50 * (365.25 / 7);
+      final expectedDelta = 3000 * 12 - weeklyPerYear - 600;
+      expect(summary.endOfPeriodBalance, closeTo(current + expectedDelta, 0.01));
+      // Mixed cadences: period total is not "fake monthly × 12" from day-of-month math.
+      expect(
+        summary.monthlyNet,
+        closeTo(3000 - 50 * (365.25 / 7) / 12 - 600 / 12, 0.01),
+      );
+    });
+
+    test('budget only adds room above recurring bills in that category', () {
+      final owner = 'p1';
+      final account = Account.create(
+        name: 'Checking',
+        type: AccountType.checking,
+        currencyCode: 'USD',
+        ownerProfileId: owner,
+        visibility: VisibilityScope.shared,
+        openingBalance: 0,
+      );
+      final housing = SpendCategory.create(
+        name: 'Housing',
+        iconName: 'home',
+        colorHex: 1,
+        isIncome: false,
+      );
+      final asOf = DateTime(2026, 8, 2);
+      final txs = [
+        MoneyTransaction.create(
+          type: TransactionType.expense,
+          amount: 2000,
+          currencyCode: 'USD',
+          accountId: account.id,
+          categoryId: housing.id,
+          ownerProfileId: owner,
+          visibility: VisibilityScope.shared,
+          date: DateTime(2026, 8, 1),
+          isRecurring: true,
+          recurrencePeriod: RecurrencePeriod.monthly,
+        ),
+      ];
+      final budgets = [
+        BudgetCategory.create(
+          categoryId: housing.id,
+          monthKey: '2026-08',
+          allocated: 3000,
+          visibility: VisibilityScope.shared,
+          ownerProfileId: owner,
+        ),
+      ];
+
+      final summary = BudgetForecast.project(
+        accounts: [account],
+        transactions: txs,
+        budgets: budgets,
+        mainCurrency: 'USD',
+        rates: FxRateService.defaultRatesFor('USD'),
+        horizon: ForecastHorizon.m1,
+        recurrence: RecurrencePeriod.monthly,
+        now: asOf,
+      );
+
+      // Recurring 2000 + leftover budget room 1000 = 3000, not 5000.
+      expect(summary.plannedExpensesMonthly, closeTo(3000, 0.01));
+      expect(summary.monthlyNet, closeTo(-3000, 0.01));
     });
 
     test('short horizon has start and end monthly points', () {

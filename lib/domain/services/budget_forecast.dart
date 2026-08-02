@@ -56,14 +56,16 @@ class BudgetForecastSummary {
   }
 }
 
-/// Monthly cashflow forecast.
+/// Cashflow forecast built from each income/expense and its own recurrence.
 ///
-/// Planned monthly net = recurring income − (recurring expenses + budgets +
-/// typical unbudgeted one-offs).
+/// Over a horizon of N months:
+///   periodDelta = Σ income×occurrences − Σ expense×occurrences
+///               − extra budget room − typical unbudgeted one-offs
+///   endBalance  = current net worth + periodDelta
 ///
-/// All horizon balances use the same monthly step:
-///   balance(n) = current + monthlyNet × n
-/// so “1 year” is exactly current + monthlyNet × 12.
+/// Occurrences use each item’s cadence (weekly ≈ 52/year, monthly × N,
+/// yearly × N/12, …). When every item is monthly, this equals
+/// current + monthlyNet × N.
 abstract final class BudgetForecast {
   static BudgetForecastSummary project({
     required List<Account> accounts,
@@ -94,7 +96,7 @@ abstract final class BudgetForecast {
       asOf: asOf,
     );
 
-    final monthlyNet = plan.monthlyNet;
+    final monthlyNet = plan.netOverMonths(1);
     final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day;
 
     final recurringTxs = transactions.where((t) => t.isRecurring).toList();
@@ -107,15 +109,15 @@ abstract final class BudgetForecast {
     // Inclusive months left in the calendar year (Aug → Aug..Dec = 5).
     final monthsToYearEnd = 12 - asOf.month + 1;
 
-    final endOfMonthBalance = current + monthlyNet;
-    final endOfYearBalance = current + monthlyNet * monthsToYearEnd;
-    final endOfPeriodBalance = current + monthlyNet * horizon.months;
+    final endOfMonthBalance = current + plan.netOverMonths(1);
+    final endOfYearBalance = current + plan.netOverMonths(monthsToYearEnd);
+    final endOfPeriodBalance = current + plan.netOverMonths(horizon.months);
 
     final series = <ForecastPoint>[
       for (var i = 0; i <= horizon.months; i++)
         ForecastPoint(
           date: DateTime(asOf.year, asOf.month + i, asOf.day),
-          balance: current + monthlyNet * i,
+          balance: current + plan.netOverMonths(i),
         ),
     ];
 
@@ -126,10 +128,43 @@ abstract final class BudgetForecast {
       monthlyNet: monthlyNet,
       dailyNet: monthlyNet / daysInMonth,
       recurringNetPerPeriod: recurringNetPerPeriod,
-      recurringIncomeMonthly: plan.recurringIncomeMonthly,
-      plannedExpensesMonthly: plan.plannedExpensesMonthly,
+      recurringIncomeMonthly: plan.incomeOverMonths(1),
+      plannedExpensesMonthly: plan.expenseOverMonths(1),
       series: _downsample(series, maxPoints: 180),
     );
+  }
+
+  /// Average length of one cycle in months (calendar-agnostic).
+  static double monthsPerCycle(RecurrencePeriod period) {
+    switch (period) {
+      case RecurrencePeriod.daily:
+        return 12 / 365.25;
+      case RecurrencePeriod.weekly:
+        return 12 / (365.25 / 7);
+      case RecurrencePeriod.monthly:
+        return 1;
+      case RecurrencePeriod.twoMonths:
+        return 2;
+      case RecurrencePeriod.quarter:
+        return 3;
+      case RecurrencePeriod.year:
+        return 12;
+    }
+  }
+
+  /// How many times a cadence fires across [months].
+  static double occurrencesOverMonths(RecurrencePeriod period, num months) {
+    if (months == 0) return 0;
+    return months / monthsPerCycle(period);
+  }
+
+  /// [amount] contributed over [months] given its native [period].
+  static double amountOverMonths(
+    double amount,
+    RecurrencePeriod period,
+    num months,
+  ) {
+    return amount * occurrencesOverMonths(period, months);
   }
 
   static List<ForecastPoint> _downsample(
@@ -167,54 +202,46 @@ abstract final class BudgetForecast {
     RecurrencePeriod to,
     DateTime asOf,
   ) {
+    // [asOf] retained so existing call sites keep compiling; conversion is
+    // calendar-length based and does not depend on the specific month.
+    assert(asOf.year > 0);
     if (from == to) return amount;
-    final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day.toDouble();
-
-    double dailyFor(RecurrencePeriod p, double value) {
-      switch (p) {
-        case RecurrencePeriod.daily:
-          return value;
-        case RecurrencePeriod.weekly:
-          return value / 7;
-        case RecurrencePeriod.monthly:
-          return value / daysInMonth;
-        case RecurrencePeriod.twoMonths:
-          return value / (daysInMonth * 2);
-        case RecurrencePeriod.quarter:
-          return value / (daysInMonth * 3);
-        case RecurrencePeriod.year:
-          return value / 365;
-      }
-    }
-
-    final daily = dailyFor(from, amount);
-    switch (to) {
-      case RecurrencePeriod.daily:
-        return daily;
-      case RecurrencePeriod.weekly:
-        return daily * 7;
-      case RecurrencePeriod.monthly:
-        return daily * daysInMonth;
-      case RecurrencePeriod.twoMonths:
-        return daily * daysInMonth * 2;
-      case RecurrencePeriod.quarter:
-        return daily * daysInMonth * 3;
-      case RecurrencePeriod.year:
-        return daily * 365;
-    }
+    final monthly = amount / monthsPerCycle(from);
+    return monthly * monthsPerCycle(to);
   }
 }
 
 class _CashflowPlan {
   _CashflowPlan({
-    required this.recurringIncomeMonthly,
-    required this.plannedExpensesMonthly,
+    required this.recurringIncomes,
+    required this.recurringExpenses,
+    required this.extraBudgetMonthly,
+    required this.unbudgetedOneOffMonthly,
   });
 
-  final double recurringIncomeMonthly;
-  final double plannedExpensesMonthly;
+  final List<_RecurringAmount> recurringIncomes;
+  final List<_RecurringAmount> recurringExpenses;
+  final double extraBudgetMonthly;
+  final double unbudgetedOneOffMonthly;
 
-  double get monthlyNet => recurringIncomeMonthly - plannedExpensesMonthly;
+  double incomeOverMonths(num months) {
+    var total = 0.0;
+    for (final item in recurringIncomes) {
+      total += BudgetForecast.amountOverMonths(item.amount, item.period, months);
+    }
+    return total;
+  }
+
+  double expenseOverMonths(num months) {
+    var total = 0.0;
+    for (final item in recurringExpenses) {
+      total += BudgetForecast.amountOverMonths(item.amount, item.period, months);
+    }
+    return total + extraBudgetMonthly * months + unbudgetedOneOffMonthly * months;
+  }
+
+  double netOverMonths(num months) =>
+      incomeOverMonths(months) - expenseOverMonths(months);
 
   factory _CashflowPlan.build({
     required List<MoneyTransaction> transactions,
@@ -227,7 +254,6 @@ class _CashflowPlan {
     final monthBudgets =
         budgets.where((b) => b.monthKey == monthKey).toList(growable: false);
     final budgetedIds = monthBudgets.map((b) => b.categoryId).toSet();
-    final allocated = monthBudgets.fold<double>(0, (s, b) => s + b.allocated);
 
     double toMainAmount(MoneyTransaction tx) => MoneyMath.toMain(
           amount: tx.amount,
@@ -237,20 +263,37 @@ class _CashflowPlan {
           overrideRate: tx.exchangeRateToMain,
         );
 
-    var recurringIncome = 0.0;
-    var recurringExpenses = 0.0;
+    final incomes = <_RecurringAmount>[];
+    final expenses = <_RecurringAmount>[];
+    final recurringMonthlyByCategory = <String, double>{};
+
     for (final tx in transactions.where((t) => t.isRecurring)) {
-      final monthly = BudgetForecast.normalizeToPeriod(
-        toMainAmount(tx),
-        tx.recurrencePeriod,
-        RecurrencePeriod.monthly,
-        asOf,
-      );
+      final amount = toMainAmount(tx);
+      final item = _RecurringAmount(amount: amount, period: tx.recurrencePeriod);
       if (tx.type == TransactionType.income) {
-        recurringIncome += monthly;
+        incomes.add(item);
       } else if (tx.type == TransactionType.expense) {
-        recurringExpenses += monthly;
+        expenses.add(item);
+        final categoryId = tx.categoryId;
+        if (categoryId != null) {
+          final monthly = BudgetForecast.amountOverMonths(
+            amount,
+            tx.recurrencePeriod,
+            1,
+          );
+          recurringMonthlyByCategory[categoryId] =
+              (recurringMonthlyByCategory[categoryId] ?? 0) + monthly;
+        }
       }
+    }
+
+    // Budgets are monthly envelopes. Only add the room not already covered by
+    // recurring bills in that category (avoids rent + housing budget twice).
+    var extraBudgetMonthly = 0.0;
+    for (final budget in monthBudgets) {
+      final covered = recurringMonthlyByCategory[budget.categoryId] ?? 0;
+      final extra = budget.allocated - covered;
+      if (extra > 0) extraBudgetMonthly += extra;
     }
 
     final nrByMonth = <String, double>{};
@@ -267,9 +310,17 @@ class _CashflowPlan {
         : nrByMonth.values.reduce((a, b) => a + b) / nrByMonth.length;
 
     return _CashflowPlan(
-      recurringIncomeMonthly: recurringIncome,
-      plannedExpensesMonthly:
-          recurringExpenses + allocated + unbudgetedNrAvg,
+      recurringIncomes: incomes,
+      recurringExpenses: expenses,
+      extraBudgetMonthly: extraBudgetMonthly,
+      unbudgetedOneOffMonthly: unbudgetedNrAvg,
     );
   }
+}
+
+class _RecurringAmount {
+  const _RecurringAmount({required this.amount, required this.period});
+
+  final double amount;
+  final RecurrencePeriod period;
 }

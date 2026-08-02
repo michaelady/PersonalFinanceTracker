@@ -409,17 +409,29 @@ class FinanceRepository extends ChangeNotifier {
   }
 
   Future<void> addTransaction(MoneyTransaction tx) async {
+    _ensureRateFor(tx.currencyCode);
     transactions = [tx, ...transactions]
       ..sort((a, b) => b.date.compareTo(a.date));
     await _persist();
   }
 
   Future<void> updateTransaction(MoneyTransaction tx) async {
+    _ensureRateFor(tx.currencyCode);
     transactions = [
       for (final t in transactions)
         if (t.id == tx.id) tx else t,
     ]..sort((a, b) => b.date.compareTo(a.date));
     await _persist();
+  }
+
+  void _ensureRateFor(String code) {
+    if (rates.any((r) => r.code == code)) return;
+    final defaults = FxRateService.defaultRatesFor(settings.mainCurrency);
+    final fallback = defaults.firstWhere(
+      (r) => r.code == code,
+      orElse: () => CurrencyRate(code: code, rateToMain: 1),
+    );
+    rates = [...rates, fallback];
   }
 
   Future<void> deleteTransaction(String id) async {

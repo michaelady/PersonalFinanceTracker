@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
 import '../../domain/services/recurrence_period.dart';
+import '../../domain/services/supported_currencies.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/money_text.dart';
 import '../../widgets/responsive.dart';
@@ -87,6 +88,7 @@ class TransactionsScreen extends StatelessWidget {
                         subtitle: Text(
                           [
                             account?.name ?? 'Account',
+                            tx.currencyCode,
                             if (tx.note.isNotEmpty) tx.note,
                             if (tx.isRecurring)
                               tx.recurringLabel ?? 'Recurring',
@@ -277,7 +279,40 @@ class _TransactionEditorState extends State<_TransactionEditor> {
           TextField(
             controller: _amount,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Amount'),
+            decoration: InputDecoration(
+              labelText: 'Amount',
+              suffixIcon: Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    // ignore: deprecated_member_use
+                    value: SupportedCurrencies.codes.contains(_currency)
+                        ? _currency
+                        : repo.settings.mainCurrency,
+                    alignment: Alignment.centerRight,
+                    items: [
+                      for (final code in SupportedCurrencies.codes)
+                        DropdownMenuItem(
+                          value: code,
+                          child: Text(
+                            code,
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleSmall
+                                ?.copyWith(
+                                  color: ZenthoColors.tealDeep,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                    ],
+                    onChanged: (code) {
+                      if (code != null) setState(() => _currency = code);
+                    },
+                  ),
+                ),
+              ),
+            ),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
@@ -286,15 +321,12 @@ class _TransactionEditorState extends State<_TransactionEditor> {
             decoration: const InputDecoration(labelText: 'Account'),
             items: [
               for (final a in repo.accounts)
-                DropdownMenuItem(value: a.id, child: Text(a.name)),
+                DropdownMenuItem(
+                  value: a.id,
+                  child: Text('${a.name} (${a.currencyCode})'),
+                ),
             ],
-            onChanged: (v) {
-              setState(() {
-                _accountId = v;
-                final account = repo.accounts.firstWhere((a) => a.id == v);
-                _currency = account.currencyCode;
-              });
-            },
+            onChanged: (v) => setState(() => _accountId = v),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(

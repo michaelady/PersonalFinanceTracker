@@ -35,24 +35,37 @@ class BudgetForecastSummary {
     required this.monthlyNet,
     required this.dailyNet,
     required this.recurringNetPerPeriod,
+    required this.recurringIncomeMonthly,
+    required this.plannedExpensesMonthly,
     required this.series,
   });
 
   final double endOfMonthBalance;
-  /// Balance at the end of the selected prediction horizon.
   final double endOfPeriodBalance;
-  /// Balance at the end of the current calendar year.
   final double endOfYearBalance;
   final double monthlyNet;
   final double dailyNet;
   final double recurringNetPerPeriod;
+  final double recurringIncomeMonthly;
+  final double plannedExpensesMonthly;
   final List<ForecastPoint> series;
+
+  bool get highSavingsRate {
+    if (recurringIncomeMonthly <= 0) return false;
+    return monthlyNet / recurringIncomeMonthly >= 0.25;
+  }
 }
 
-/// Projects balances from current net worth using:
-/// - recurring transactions on their cadence
-/// - future-dated one-off transactions once
-/// - remaining / planned budget spend (not MTD velocity forever)
+/// Projects balances from current net worth.
+///
+/// Conservative monthly expense plan:
+///   recurring expenses
+///   + category budgets (planned spend)
+///   + typical unbudgeted one-off spend
+///
+/// This intentionally keeps budgets even when a recurring bill exists in the
+/// same category, so incomplete discretionary tracking does not inflate the
+/// surplus. Recurring income/expenses still land on their real dates.
 abstract final class BudgetForecast {
   static BudgetForecastSummary project({
     required List<Account> accounts,
@@ -79,7 +92,7 @@ abstract final class BudgetForecast {
       asOf: asOf,
     );
 
-    final plan = _NonRecurringPlan.build(
+    final plan = _CashflowPlan.build(
       transactions: transactions,
       budgets: budgets,
       mainCurrency: mainCurrency,
@@ -103,6 +116,8 @@ abstract final class BudgetForecast {
           _OneOffFlow(
             date: _dateOnly(tx.date),
             amount: _signedMain(tx, mainCurrency, rates),
+            coveredByBudgetBurn: tx.categoryId != null &&
+                plan.budgetedCategoryIds.contains(tx.categoryId),
           ),
     ]..sort((a, b) => a.date.compareTo(b.date));
 
@@ -112,19 +127,7 @@ abstract final class BudgetForecast {
           normalizeToPeriod(signed, tx.recurrencePeriod, recurrence, asOf);
     });
 
-    final recurringMonthly = recurringTxs.fold<double>(0, (sum, tx) {
-      final signed = _signedMain(tx, mainCurrency, rates);
-      return sum +
-          normalizeToPeriod(
-            signed,
-            tx.recurrencePeriod,
-            RecurrencePeriod.monthly,
-            asOf,
-          );
-    });
-
-    // Planned non-recurring spend is budget-based, not MTD extrapolation.
-    final monthlyNet = recurringMonthly - plan.steadyMonthlySpend;
+    final monthlyNet = plan.monthlyNet;
     final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day;
 
     var balance = current;
@@ -142,7 +145,10 @@ abstract final class BudgetForecast {
 
       while (oneOffIndex < oneOffs.length &&
           !oneOffs[oneOffIndex].date.isAfter(day)) {
-        balance += oneOffs[oneOffIndex].amount;
+        final oneOff = oneOffs[oneOffIndex];
+        if (!oneOff.coveredByBudgetBurn) {
+          balance += oneOff.amount;
+        }
         oneOffIndex++;
       }
 
@@ -197,6 +203,8 @@ abstract final class BudgetForecast {
       monthlyNet: monthlyNet,
       dailyNet: monthlyNet / daysInMonth,
       recurringNetPerPeriod: recurringNetPerPeriod,
+      recurringIncomeMonthly: plan.recurringIncomeMonthly,
+      plannedExpensesMonthly: plan.plannedExpensesMonthly,
       series: _downsample(clipped, maxPoints: 180),
     );
   }
@@ -293,22 +301,26 @@ abstract final class BudgetForecast {
   }
 }
 
-class _NonRecurringPlan {
-  _NonRecurringPlan({
+class _CashflowPlan {
+  _CashflowPlan({
     required this.asOf,
-    required this.monthEnd,
+    required this.budgetedCategoryIds,
+    required this.recurringIncomeMonthly,
+    required this.plannedExpensesMonthly,
     required this.remainingThisMonthDaily,
     required this.steadyDaily,
-    required this.steadyMonthlySpend,
   });
 
   final DateTime asOf;
-  final DateTime monthEnd;
+  final Set<String> budgetedCategoryIds;
+  final double recurringIncomeMonthly;
+  final double plannedExpensesMonthly;
   final double remainingThisMonthDaily;
   final double steadyDaily;
-  final double steadyMonthlySpend;
 
-  factory _NonRecurringPlan.build({
+  double get monthlyNet => recurringIncomeMonthly - plannedExpensesMonthly;
+
+  factory _CashflowPlan.build({
     required List<MoneyTransaction> transactions,
     required List<BudgetCategory> budgets,
     required String mainCurrency,
@@ -316,67 +328,116 @@ class _NonRecurringPlan {
     required DateTime asOf,
   }) {
     final monthKey = MoneyMath.monthKey(asOf);
-    final monthEnd = DateTime(asOf.year, asOf.month + 1, 0);
-    final daysInMonth = monthEnd.day;
+    final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day;
     final daysLeft = (daysInMonth - asOf.day).clamp(0, 31);
 
     final monthBudgets =
         budgets.where((b) => b.monthKey == monthKey).toList(growable: false);
-    final allocated = monthBudgets.fold<double>(0, (s, b) => s + b.allocated);
     final budgetedIds = monthBudgets.map((b) => b.categoryId).toSet();
+    final allocated = monthBudgets.fold<double>(0, (s, b) => s + b.allocated);
 
-    double amountOnOrBefore(MoneyTransaction tx) {
-      if (tx.type != TransactionType.expense) return 0;
-      if (MoneyMath.monthKey(tx.date) != monthKey) return 0;
-      if (tx.categoryId == null || !budgetedIds.contains(tx.categoryId)) {
-        return 0;
-      }
-      return MoneyMath.toMain(
-        amount: tx.amount,
-        currencyCode: tx.currencyCode,
-        mainCurrency: mainCurrency,
-        rates: rates,
-        overrideRate: tx.exchangeRateToMain,
+    double toMainAmount(MoneyTransaction tx) => MoneyMath.toMain(
+          amount: tx.amount,
+          currencyCode: tx.currencyCode,
+          mainCurrency: mainCurrency,
+          rates: rates,
+          overrideRate: tx.exchangeRateToMain,
+        );
+
+    var recurringIncome = 0.0;
+    var recurringExpenses = 0.0;
+    for (final tx in transactions.where((t) => t.isRecurring)) {
+      final monthly = BudgetForecast.normalizeToPeriod(
+        toMainAmount(tx),
+        tx.recurrencePeriod,
+        RecurrencePeriod.monthly,
+        asOf,
       );
-    }
-
-    var spentToDate = 0.0;
-    var futureBudgetedOneOffs = 0.0;
-    for (final tx in transactions) {
-      final amount = amountOnOrBefore(tx);
-      if (amount <= 0) continue;
-      final day = DateTime(tx.date.year, tx.date.month, tx.date.day);
-      if (!day.isAfter(asOf)) {
-        spentToDate += amount;
-      } else if (!tx.isRecurring) {
-        // Future one-offs are applied explicitly; keep them out of daily burn.
-        futureBudgetedOneOffs += amount;
+      if (tx.type == TransactionType.income) {
+        recurringIncome += monthly;
+      } else if (tx.type == TransactionType.expense) {
+        recurringExpenses += monthly;
       }
     }
 
-    final remainingThisMonth =
-        (allocated - spentToDate - futureBudgetedOneOffs)
-            .clamp(0.0, double.infinity)
-            .toDouble();
+    // Typical monthly one-offs outside budgeted categories.
+    final nrByMonth = <String, double>{};
+    for (final tx in transactions) {
+      if (tx.isRecurring || tx.type != TransactionType.expense) continue;
+      final budgeted =
+          tx.categoryId != null && budgetedIds.contains(tx.categoryId);
+      if (budgeted) continue;
+      final key = MoneyMath.monthKey(tx.date);
+      nrByMonth[key] = (nrByMonth[key] ?? 0) + toMainAmount(tx);
+    }
+    final unbudgetedNrAvg = nrByMonth.isEmpty
+        ? 0.0
+        : nrByMonth.values.reduce((a, b) => a + b) / nrByMonth.length;
+
+    final plannedExpenses =
+        recurringExpenses + allocated + unbudgetedNrAvg;
+
+    // Rest-of-month budget burn: only non-recurring spend reduces the
+    // remaining envelope, so already-paid rent does not zero out planned
+    // housing/grocery spend for the rest of the month.
+    var nonRecurringBudgetedToDate = 0.0;
+    var futureNonRecurringBudgeted = 0.0;
+    for (final tx in transactions) {
+      if (tx.isRecurring || tx.type != TransactionType.expense) continue;
+      if (MoneyMath.monthKey(tx.date) != monthKey) continue;
+      if (tx.categoryId == null || !budgetedIds.contains(tx.categoryId)) {
+        continue;
+      }
+      final amount = toMainAmount(tx);
+      final day = DateTime(tx.date.year, tx.date.month, tx.date.day);
+      if (day.isAfter(asOf)) {
+        futureNonRecurringBudgeted += amount;
+      } else {
+        nonRecurringBudgetedToDate += amount;
+      }
+    }
+    final remainingBudgets = (allocated -
+            nonRecurringBudgetedToDate -
+            futureNonRecurringBudgeted)
+        .clamp(0.0, double.infinity)
+        .toDouble();
+
+    var unbudgetedNrSpentToDate = 0.0;
+    for (final tx in transactions) {
+      if (tx.isRecurring || tx.type != TransactionType.expense) continue;
+      if (MoneyMath.monthKey(tx.date) != monthKey) continue;
+      final budgeted =
+          tx.categoryId != null && budgetedIds.contains(tx.categoryId);
+      if (budgeted) continue;
+      final day = DateTime(tx.date.year, tx.date.month, tx.date.day);
+      if (day.isAfter(asOf)) continue;
+      unbudgetedNrSpentToDate += toMainAmount(tx);
+    }
+    final remainingUnbudgetedNr = (unbudgetedNrAvg - unbudgetedNrSpentToDate)
+        .clamp(0.0, double.infinity)
+        .toDouble();
+
+    final remainingThisMonth = remainingBudgets + remainingUnbudgetedNr;
     final remainingDaily =
         daysLeft == 0 ? 0.0 : -remainingThisMonth / daysLeft;
-    final steadyDaily = daysInMonth == 0 ? 0.0 : -allocated / daysInMonth;
+    final steadyDaily = daysInMonth == 0
+        ? 0.0
+        : -(allocated + unbudgetedNrAvg) / daysInMonth;
 
-    return _NonRecurringPlan(
+    return _CashflowPlan(
       asOf: asOf,
-      monthEnd: monthEnd,
+      budgetedCategoryIds: budgetedIds,
+      recurringIncomeMonthly: recurringIncome,
+      plannedExpensesMonthly: plannedExpenses,
       remainingThisMonthDaily: remainingDaily,
       steadyDaily: steadyDaily,
-      steadyMonthlySpend: allocated,
     );
   }
 
-  /// Daily planned non-recurring burn for [day] (negative or zero).
   double dailyFor(DateTime day) {
     if (day.year == asOf.year && day.month == asOf.month) {
       return remainingThisMonthDaily;
     }
-    // Assume the current month's budget plan continues as a steady template.
     return steadyDaily;
   }
 }
@@ -394,8 +455,13 @@ class _RecurringFlow {
 }
 
 class _OneOffFlow {
-  const _OneOffFlow({required this.date, required this.amount});
+  const _OneOffFlow({
+    required this.date,
+    required this.amount,
+    required this.coveredByBudgetBurn,
+  });
 
   final DateTime date;
   final double amount;
+  final bool coveredByBudgetBurn;
 }

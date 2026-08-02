@@ -48,8 +48,8 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           Text('Budgets', style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 4),
           Text(
-            'Tap a budget to edit. Forecasts use recurring cadence plus planned '
-            'budget spend — not one-off month-to-date velocity.',
+            'Tap a budget to edit. Forecasts use recurring bills, your budgets, '
+            'and typical unbudgeted one-offs from recent months.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 20),
@@ -60,8 +60,9 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
             periodLabel: _horizon.label,
             endOfYear: forecast.endOfYearBalance,
             monthlyNet: forecast.monthlyNet,
-            recurringNetPerPeriod: forecast.recurringNetPerPeriod,
-            recurrenceLabel: _recurrence.label,
+            recurringIncome: forecast.recurringIncomeMonthly,
+            plannedExpenses: forecast.plannedExpensesMonthly,
+            highSavingsRate: forecast.highSavingsRate,
           ),
           const SizedBox(height: 20),
           Text(
@@ -318,8 +319,9 @@ class _PredictionCards extends StatelessWidget {
     required this.periodLabel,
     required this.endOfYear,
     required this.monthlyNet,
-    required this.recurringNetPerPeriod,
-    required this.recurrenceLabel,
+    required this.recurringIncome,
+    required this.plannedExpenses,
+    required this.highSavingsRate,
   });
 
   final String currency;
@@ -328,8 +330,9 @@ class _PredictionCards extends StatelessWidget {
   final String periodLabel;
   final double endOfYear;
   final double monthlyNet;
-  final double recurringNetPerPeriod;
-  final String recurrenceLabel;
+  final double recurringIncome;
+  final double plannedExpenses;
+  final bool highSavingsRate;
 
   @override
   Widget build(BuildContext context) {
@@ -359,14 +362,19 @@ class _PredictionCards extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         _PredictTile(
-          label: 'Projected monthly net',
-          child: MoneyText(monthlyNet, currencyCode: currency, signed: true),
+          label: 'Assumed monthly income',
+          child: MoneyText(recurringIncome, currencyCode: currency, signed: true),
+        ),
+        const SizedBox(height: 8),
+        _PredictTile(
+          label: 'Assumed monthly expenses',
+          child: MoneyText(-plannedExpenses, currencyCode: currency, signed: true),
         ),
         const SizedBox(height: 4),
         Align(
           alignment: Alignment.centerLeft,
           child: Text(
-            'Recurring net minus this month’s budget plan',
+            'Recurring bills + category budgets + typical unbudgeted one-offs',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: ZenthoColors.inkMuted,
                 ),
@@ -374,13 +382,27 @@ class _PredictionCards extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         _PredictTile(
-          label: 'Recurring net / $recurrenceLabel',
-          child: MoneyText(
-            recurringNetPerPeriod,
-            currencyCode: currency,
-            signed: true,
-          ),
+          label: 'Projected monthly net',
+          child: MoneyText(monthlyNet, currencyCode: currency, signed: true),
         ),
+        if (highSavingsRate) ...[
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: ZenthoColors.amber.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: ZenthoColors.amber.withValues(alpha: 0.4)),
+            ),
+            child: Text(
+              'Savings rate looks high from the data entered. If this feels '
+              'too optimistic, add missing recurring expenses or budgets '
+              '(dining, transport, fun, etc.).',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ],
       ],
     );
   }

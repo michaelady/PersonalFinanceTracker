@@ -1,6 +1,8 @@
 import 'package:equatable/equatable.dart';
 import 'package:uuid/uuid.dart';
 
+import '../services/recurrence_period.dart';
+
 const _uuid = Uuid();
 const Object _copyKeep = Object();
 
@@ -259,6 +261,7 @@ class MoneyTransaction extends Equatable {
     this.exchangeRateToMain,
     this.isRecurring = false,
     this.recurringLabel,
+    this.recurrencePeriod = RecurrencePeriod.monthly,
   });
 
   final String id;
@@ -275,6 +278,7 @@ class MoneyTransaction extends Equatable {
   final double? exchangeRateToMain;
   final bool isRecurring;
   final String? recurringLabel;
+  final RecurrencePeriod recurrencePeriod;
 
   factory MoneyTransaction.create({
     required TransactionType type,
@@ -290,6 +294,7 @@ class MoneyTransaction extends Equatable {
     double? exchangeRateToMain,
     bool isRecurring = false,
     String? recurringLabel,
+    RecurrencePeriod recurrencePeriod = RecurrencePeriod.monthly,
   }) {
     return MoneyTransaction(
       id: _uuid.v4(),
@@ -306,6 +311,7 @@ class MoneyTransaction extends Equatable {
       exchangeRateToMain: exchangeRateToMain,
       isRecurring: isRecurring,
       recurringLabel: recurringLabel,
+      recurrencePeriod: recurrencePeriod,
     );
   }
 
@@ -322,6 +328,7 @@ class MoneyTransaction extends Equatable {
     double? exchangeRateToMain,
     bool? isRecurring,
     Object? recurringLabel = _copyKeep,
+    RecurrencePeriod? recurrencePeriod,
   }) {
     return MoneyTransaction(
       id: id,
@@ -340,6 +347,7 @@ class MoneyTransaction extends Equatable {
       recurringLabel: identical(recurringLabel, _copyKeep)
           ? this.recurringLabel
           : recurringLabel as String?,
+      recurrencePeriod: recurrencePeriod ?? this.recurrencePeriod,
     );
   }
 
@@ -358,6 +366,7 @@ class MoneyTransaction extends Equatable {
         'exchangeRateToMain': exchangeRateToMain,
         'isRecurring': isRecurring,
         'recurringLabel': recurringLabel,
+        'recurrencePeriod': recurrencePeriod.name,
       };
 
   factory MoneyTransaction.fromJson(Map<String, dynamic> json) {
@@ -376,6 +385,8 @@ class MoneyTransaction extends Equatable {
       exchangeRateToMain: (json['exchangeRateToMain'] as num?)?.toDouble(),
       isRecurring: json['isRecurring'] as bool? ?? false,
       recurringLabel: json['recurringLabel'] as String?,
+      recurrencePeriod:
+          RecurrencePeriod.tryParse(json['recurrencePeriod'] as String?),
     );
   }
 
@@ -395,6 +406,7 @@ class MoneyTransaction extends Equatable {
         exchangeRateToMain,
         isRecurring,
         recurringLabel,
+        recurrencePeriod,
       ];
 }
 

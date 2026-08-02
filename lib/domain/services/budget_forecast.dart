@@ -1,5 +1,6 @@
 import '../models/models.dart';
 import 'money_math.dart';
+import 'recurrence_period.dart';
 
 enum ForecastHorizon {
   m1(1, '1 month'),
@@ -32,6 +33,7 @@ class BudgetForecastSummary {
     required this.endOfYearBalance,
     required this.monthlyNet,
     required this.dailyNet,
+    required this.recurringNetPerPeriod,
     required this.series,
   });
 
@@ -39,10 +41,11 @@ class BudgetForecastSummary {
   final double endOfYearBalance;
   final double monthlyNet;
   final double dailyNet;
+  final double recurringNetPerPeriod;
   final List<ForecastPoint> series;
 }
 
-/// Projects balances from current net worth using recent cash-flow pace.
+/// Projects balances using non-recurring pace + explicit recurring cadence.
 abstract final class BudgetForecast {
   static BudgetForecastSummary project({
     required List<Account> accounts,
@@ -51,9 +54,16 @@ abstract final class BudgetForecast {
     required String mainCurrency,
     required List<CurrencyRate> rates,
     required ForecastHorizon horizon,
+    RecurrencePeriod recurrence = RecurrencePeriod.monthly,
     DateTime? now,
   }) {
-    final asOf = now ?? DateTime.now();
+    final rawNow = now ?? DateTime.now();
+    final asOf = DateTime(rawNow.year, rawNow.month, rawNow.day);
+    final horizonEnd = DateTime(asOf.year, asOf.month + horizon.months, asOf.day);
+    final monthEnd = DateTime(asOf.year, asOf.month + 1, 0);
+    final yearEnd = DateTime(asOf.year, 12, 31);
+    final simEnd = _maxDate(horizonEnd, _maxDate(monthEnd, yearEnd));
+
     final current = MoneyMath.netWorthMain(
       accounts: accounts,
       transactions: transactions,
@@ -61,7 +71,7 @@ abstract final class BudgetForecast {
       rates: rates,
     );
 
-    final pace = _pace(
+    final nonRecurringDaily = _nonRecurringDailyNet(
       transactions: transactions,
       budgets: budgets,
       mainCurrency: mainCurrency,
@@ -69,52 +79,178 @@ abstract final class BudgetForecast {
       asOf: asOf,
     );
 
-    final daysLeftInMonth =
-        DateTime(asOf.year, asOf.month + 1, 0).day - asOf.day;
-    final endOfMonth = current + pace.dailyNet * daysLeftInMonth;
-
-    final monthOfYear = asOf.month;
-    final monthsLeftInYear = 12 - monthOfYear;
-    // Finish current month at daily pace, then remaining full months.
-    final endOfYear = endOfMonth + pace.monthlyNet * monthsLeftInYear;
-
-    final series = <ForecastPoint>[
-      ForecastPoint(date: asOf, balance: current),
+    final recurringTxs = transactions.where((t) => t.isRecurring).toList();
+    final flows = [
+      for (final tx in recurringTxs)
+        _RecurringFlow(
+          amount: _signedMain(tx, mainCurrency, rates),
+          period: tx.recurrencePeriod,
+          nextDue: _nextDueAfter(tx.date, tx.recurrencePeriod, asOf),
+        ),
     ];
-    var running = current;
-    // Sample monthly points across the horizon (plus intra-month for short spans).
-    if (horizon.months <= 1) {
-      final end = DateTime(asOf.year, asOf.month + 1, 0);
-      final days = end.difference(asOf).inDays.clamp(1, 31);
-      for (var d = 1; d <= days; d++) {
-        running = current + pace.dailyNet * d;
-        series.add(
-          ForecastPoint(date: asOf.add(Duration(days: d)), balance: running),
-        );
-      }
-    } else {
-      for (var m = 1; m <= horizon.months; m++) {
-        // First month uses remaining-days pace, then full months.
-        if (m == 1) {
-          running = endOfMonth;
-        } else {
-          running += pace.monthlyNet;
+
+    final recurringNetPerPeriod = recurringTxs.fold<double>(0, (sum, tx) {
+      final signed = _signedMain(tx, mainCurrency, rates);
+      return sum +
+          normalizeToPeriod(signed, tx.recurrencePeriod, recurrence, asOf);
+    });
+
+    var balance = current;
+    double? endOfMonthBalance;
+    double? endOfYearBalance;
+    final series = <ForecastPoint>[ForecastPoint(date: asOf, balance: balance)];
+    var nextSample = recurrence.addTo(asOf);
+
+    var day = asOf;
+    while (day.isBefore(simEnd)) {
+      day = day.add(const Duration(days: 1));
+      balance += nonRecurringDaily;
+
+      for (final flow in flows) {
+        while (!flow.nextDue.isAfter(day)) {
+          balance += flow.amount;
+          flow.nextDue = flow.period.addTo(flow.nextDue);
         }
-        final date = DateTime(asOf.year, asOf.month + m, 0);
-        series.add(ForecastPoint(date: date, balance: running));
+      }
+
+      if (day == monthEnd) endOfMonthBalance = balance;
+      if (day == yearEnd) endOfYearBalance = balance;
+
+      final onHorizonEnd = day == horizonEnd || day.isAtSameMomentAs(horizonEnd);
+      if ((!day.isBefore(nextSample) && !day.isAfter(horizonEnd)) ||
+          onHorizonEnd) {
+        if (!series.any((p) => p.date == day)) {
+          series.add(ForecastPoint(date: day, balance: balance));
+        }
+        while (!nextSample.isAfter(day)) {
+          nextSample = recurrence.addTo(nextSample);
+        }
       }
     }
 
+    // Ensure final horizon point exists.
+    if (series.last.date != horizonEnd && !horizonEnd.isBefore(asOf)) {
+      // Re-simulate only to horizon if sim went further — use last known at/before.
+      final atHorizon = series.lastWhere(
+        (p) => !p.date.isAfter(horizonEnd),
+        orElse: () => series.first,
+      );
+      if (atHorizon.date != horizonEnd) {
+        series.add(ForecastPoint(date: horizonEnd, balance: atHorizon.balance));
+      }
+    }
+
+    final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day;
+    final monthlyNet = nonRecurringDaily * daysInMonth +
+        normalizeToPeriod(
+          recurringNetPerPeriod,
+          recurrence,
+          RecurrencePeriod.monthly,
+          asOf,
+        );
+
+    final clipped = [
+      for (final p in series)
+        if (!p.date.isAfter(horizonEnd)) p,
+    ];
+
     return BudgetForecastSummary(
-      endOfMonthBalance: endOfMonth,
-      endOfYearBalance: endOfYear,
-      monthlyNet: pace.monthlyNet,
-      dailyNet: pace.dailyNet,
-      series: series,
+      endOfMonthBalance: endOfMonthBalance ?? balance,
+      endOfYearBalance: endOfYearBalance ?? balance,
+      monthlyNet: monthlyNet,
+      dailyNet: monthlyNet / daysInMonth,
+      recurringNetPerPeriod: recurringNetPerPeriod,
+      series: _downsample(clipped, maxPoints: 180),
     );
   }
 
-  static ({double dailyNet, double monthlyNet}) _pace({
+  static List<ForecastPoint> _downsample(
+    List<ForecastPoint> points, {
+    required int maxPoints,
+  }) {
+    if (points.length <= maxPoints) return points;
+    final result = <ForecastPoint>[points.first];
+    final step = (points.length - 1) / (maxPoints - 1);
+    for (var i = 1; i < maxPoints - 1; i++) {
+      result.add(points[(i * step).round()]);
+    }
+    result.add(points.last);
+    return result;
+  }
+
+  static DateTime _maxDate(DateTime a, DateTime b) => a.isAfter(b) ? a : b;
+
+  static double _signedMain(
+    MoneyTransaction tx,
+    String mainCurrency,
+    List<CurrencyRate> rates,
+  ) {
+    final main = MoneyMath.toMain(
+      amount: tx.amount,
+      currencyCode: tx.currencyCode,
+      mainCurrency: mainCurrency,
+      rates: rates,
+      overrideRate: tx.exchangeRateToMain,
+    );
+    return tx.type == TransactionType.expense ? -main : main;
+  }
+
+  static DateTime _nextDueAfter(
+    DateTime anchor,
+    RecurrencePeriod period,
+    DateTime asOf,
+  ) {
+    var due = DateTime(anchor.year, anchor.month, anchor.day);
+    for (var i = 0; i < 100000 && !due.isAfter(asOf); i++) {
+      due = period.addTo(due);
+    }
+    return due;
+  }
+
+  static double normalizeToPeriod(
+    double amount,
+    RecurrencePeriod from,
+    RecurrencePeriod to,
+    DateTime asOf,
+  ) {
+    if (from == to) return amount;
+    final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day.toDouble();
+
+    double dailyFor(RecurrencePeriod p, double value) {
+      switch (p) {
+        case RecurrencePeriod.daily:
+          return value;
+        case RecurrencePeriod.weekly:
+          return value / 7;
+        case RecurrencePeriod.monthly:
+          return value / daysInMonth;
+        case RecurrencePeriod.twoMonths:
+          return value / (daysInMonth * 2);
+        case RecurrencePeriod.quarter:
+          return value / (daysInMonth * 3);
+        case RecurrencePeriod.year:
+          return value / 365;
+      }
+    }
+
+    final daily = dailyFor(from, amount);
+    switch (to) {
+      case RecurrencePeriod.daily:
+        return daily;
+      case RecurrencePeriod.weekly:
+        return daily * 7;
+      case RecurrencePeriod.monthly:
+        return daily * daysInMonth;
+      case RecurrencePeriod.twoMonths:
+        return daily * daysInMonth * 2;
+      case RecurrencePeriod.quarter:
+        return daily * daysInMonth * 3;
+      case RecurrencePeriod.year:
+        return daily * 365;
+    }
+  }
+
+  static double _nonRecurringDailyNet({
     required List<MoneyTransaction> transactions,
     required List<BudgetCategory> budgets,
     required String mainCurrency,
@@ -122,22 +258,21 @@ abstract final class BudgetForecast {
     required DateTime asOf,
   }) {
     final monthKey = MoneyMath.monthKey(asOf);
+    final nonRecurring = transactions.where((t) => !t.isRecurring).toList();
     final income = MoneyMath.incomeInMonthMain(
-      transactions: transactions,
+      transactions: nonRecurring,
       monthKeyValue: monthKey,
       mainCurrency: mainCurrency,
       rates: rates,
     );
     final expense = MoneyMath.expenseInMonthMain(
-      transactions: transactions,
+      transactions: nonRecurring,
       monthKeyValue: monthKey,
       mainCurrency: mainCurrency,
       rates: rates,
     );
     final dayOfMonth = asOf.day.clamp(1, 31);
     final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day;
-
-    // Prefer observed pace this month; if thin data, fall back to budgets.
     final allocated = MoneyMath.totalBudgetAllocated(
       budgets: budgets,
       monthKeyValue: monthKey,
@@ -145,12 +280,9 @@ abstract final class BudgetForecast {
 
     double monthlyIncome;
     double monthlyExpense;
-
     if (income > 0 || expense > 0) {
       monthlyIncome = income / dayOfMonth * daysInMonth;
       monthlyExpense = expense / dayOfMonth * daysInMonth;
-      // If budgets exist and observed spend is very low early in month,
-      // blend toward allocated spend for a more realistic outlook.
       if (allocated > 0 && dayOfMonth <= 7) {
         monthlyExpense = (monthlyExpense + allocated) / 2;
       }
@@ -158,31 +290,21 @@ abstract final class BudgetForecast {
       monthlyIncome = 0;
       monthlyExpense = allocated;
     } else {
-      // Look back up to 90 days for averages.
-      final cutoff = asOf.subtract(const Duration(days: 90));
-      final recent = transactions.where((t) => !t.date.isBefore(cutoff));
-      var inc = 0.0;
-      var exp = 0.0;
-      for (final tx in recent) {
-        final main = MoneyMath.toMain(
-          amount: tx.amount,
-          currencyCode: tx.currencyCode,
-          mainCurrency: mainCurrency,
-          rates: rates,
-          overrideRate: tx.exchangeRateToMain,
-        );
-        if (tx.type == TransactionType.income) {
-          inc += main;
-        } else if (tx.type == TransactionType.expense) {
-          exp += main;
-        }
-      }
-      monthlyIncome = inc / 3;
-      monthlyExpense = exp / 3;
+      monthlyIncome = 0;
+      monthlyExpense = 0;
     }
-
-    final monthlyNet = monthlyIncome - monthlyExpense;
-    final dailyNet = monthlyNet / daysInMonth;
-    return (dailyNet: dailyNet, monthlyNet: monthlyNet);
+    return (monthlyIncome - monthlyExpense) / daysInMonth;
   }
+}
+
+class _RecurringFlow {
+  _RecurringFlow({
+    required this.amount,
+    required this.period,
+    required this.nextDue,
+  });
+
+  final double amount;
+  final RecurrencePeriod period;
+  DateTime nextDue;
 }

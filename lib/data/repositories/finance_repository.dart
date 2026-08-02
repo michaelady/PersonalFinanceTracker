@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../domain/models/models.dart';
 import '../../domain/services/csv_import_service.dart';
 import '../../domain/services/money_math.dart';
+import '../../domain/services/recurrence_period.dart';
 import '../../domain/services/supported_currencies.dart';
 import '../persistence/local_store.dart';
 import '../services/fx_rate_service.dart';
@@ -312,6 +313,7 @@ class FinanceRepository extends ChangeNotifier {
         note: 'Streaming',
         isRecurring: true,
         recurringLabel: 'Stream+',
+        recurrencePeriod: RecurrencePeriod.monthly,
       ),
     ];
 

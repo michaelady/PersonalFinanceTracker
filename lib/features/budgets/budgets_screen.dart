@@ -7,6 +7,7 @@ import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
 import '../../domain/services/budget_forecast.dart';
 import '../../domain/services/money_math.dart';
+import '../../domain/services/recurrence_period.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/money_text.dart';
 import '../../widgets/responsive.dart';
@@ -21,6 +22,7 @@ class BudgetsScreen extends StatefulWidget {
 
 class _BudgetsScreenState extends State<BudgetsScreen> {
   ForecastHorizon _horizon = ForecastHorizon.y1;
+  RecurrencePeriod _recurrence = RecurrencePeriod.monthly;
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +39,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       mainCurrency: repo.settings.mainCurrency,
       rates: repo.rates,
       horizon: _horizon,
+      recurrence: _recurrence,
     );
 
     return AppScaffoldBody(
@@ -45,7 +48,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           Text('Budgets', style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 4),
           Text(
-            'Tap a budget to edit. Forecasts use your current cash-flow pace.',
+            'Tap a budget to edit. Forecasts apply recurring cash flows by cadence.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 20),
@@ -54,32 +57,45 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
             endOfMonth: forecast.endOfMonthBalance,
             endOfYear: forecast.endOfYearBalance,
             monthlyNet: forecast.monthlyNet,
+            recurringNetPerPeriod: forecast.recurringNetPerPeriod,
+            recurrenceLabel: _recurrence.label,
           ),
           const SizedBox(height: 20),
           Text(
             'Total prediction',
             style: Theme.of(context).textTheme.titleLarge,
           ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
+          const SizedBox(height: 12),
+          DropdownButtonFormField<ForecastHorizon>(
+            // ignore: deprecated_member_use
+            value: _horizon,
+            decoration: const InputDecoration(
+              labelText: 'Prediction period',
+            ),
+            items: [
               for (final h in ForecastHorizon.values)
-                ChoiceChip(
-                  label: Text(h.label),
-                  selected: _horizon == h,
-                  selectedColor: ZenthoColors.mint,
-                  labelStyle: TextStyle(
-                    color: _horizon == h
-                        ? ZenthoColors.tealDeep
-                        : ZenthoColors.inkMuted,
-                    fontWeight:
-                        _horizon == h ? FontWeight.w700 : FontWeight.w500,
-                  ),
-                  onSelected: (_) => setState(() => _horizon = h),
-                ),
+                DropdownMenuItem(value: h, child: Text(h.label)),
             ],
+            onChanged: (v) {
+              if (v != null) setState(() => _horizon = v);
+            },
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<RecurrencePeriod>(
+            // ignore: deprecated_member_use
+            value: _recurrence,
+            decoration: const InputDecoration(
+              labelText: 'Recurrence',
+              helperText:
+                  'Chart sampling + how recurring amounts are normalized in the summary',
+            ),
+            items: [
+              for (final p in RecurrencePeriod.values)
+                DropdownMenuItem(value: p, child: Text(p.label)),
+            ],
+            onChanged: (v) {
+              if (v != null) setState(() => _recurrence = v);
+            },
           ),
           const SizedBox(height: 12),
           _ForecastChart(
@@ -297,12 +313,16 @@ class _PredictionCards extends StatelessWidget {
     required this.endOfMonth,
     required this.endOfYear,
     required this.monthlyNet,
+    required this.recurringNetPerPeriod,
+    required this.recurrenceLabel,
   });
 
   final String currency;
   final double endOfMonth;
   final double endOfYear;
   final double monthlyNet;
+  final double recurringNetPerPeriod;
+  final String recurrenceLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -329,6 +349,15 @@ class _PredictionCards extends StatelessWidget {
         _PredictTile(
           label: 'Projected monthly net',
           child: MoneyText(monthlyNet, currencyCode: currency, signed: true),
+        ),
+        const SizedBox(height: 8),
+        _PredictTile(
+          label: 'Recurring net / $recurrenceLabel',
+          child: MoneyText(
+            recurringNetPerPeriod,
+            currencyCode: currency,
+            signed: true,
+          ),
         ),
       ],
     );

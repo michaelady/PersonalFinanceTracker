@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
+import '../../domain/services/recurrence_period.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/money_text.dart';
 import '../../widgets/responsive.dart';
@@ -132,6 +133,7 @@ class _TransactionEditorState extends State<_TransactionEditor> {
   String? _accountId;
   String? _categoryId;
   late bool _recurring;
+  late RecurrencePeriod _recurrencePeriod;
   late String _currency;
   late DateTime _date;
 
@@ -159,6 +161,8 @@ class _TransactionEditorState extends State<_TransactionEditor> {
         .toList();
     _categoryId = existing?.categoryId ?? (cats.isEmpty ? null : cats.first.id);
     _recurring = existing?.isRecurring ?? false;
+    _recurrencePeriod =
+        existing?.recurrencePeriod ?? RecurrencePeriod.monthly;
     _date = existing?.date ?? DateTime.now();
     _amount = TextEditingController(
       text: existing == null ? '' : existing.amount.toString(),
@@ -197,6 +201,7 @@ class _TransactionEditorState extends State<_TransactionEditor> {
           isRecurring: _recurring,
           recurringLabel:
               _recurring ? (note.isEmpty ? 'Recurring' : note) : null,
+          recurrencePeriod: _recurrencePeriod,
         ),
       );
     } else {
@@ -212,7 +217,9 @@ class _TransactionEditorState extends State<_TransactionEditor> {
           visibility: _visibility,
           note: note,
           isRecurring: _recurring,
-          recurringLabel: _recurring ? (note.isEmpty ? 'Recurring' : note) : null,
+          recurringLabel:
+              _recurring ? (note.isEmpty ? 'Recurring' : note) : null,
+          recurrencePeriod: _recurrencePeriod,
         ),
       );
     }
@@ -345,6 +352,21 @@ class _TransactionEditorState extends State<_TransactionEditor> {
             activeThumbColor: ZenthoColors.tealDeep,
             onChanged: (v) => setState(() => _recurring = v),
           ),
+          if (_recurring) ...[
+            DropdownButtonFormField<RecurrencePeriod>(
+              // ignore: deprecated_member_use
+              value: _recurrencePeriod,
+              decoration: const InputDecoration(labelText: 'Recurs every'),
+              items: [
+                for (final p in RecurrencePeriod.values)
+                  DropdownMenuItem(value: p, child: Text(p.label)),
+              ],
+              onChanged: (v) {
+                if (v != null) setState(() => _recurrencePeriod = v);
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
           TextField(
             controller: _note,
             decoration: const InputDecoration(labelText: 'Note'),

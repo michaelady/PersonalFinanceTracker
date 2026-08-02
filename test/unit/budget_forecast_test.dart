@@ -1,8 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zentho/data/services/fx_rate_service.dart';
 import 'package:zentho/domain/models/models.dart';
 import 'package:zentho/domain/services/budget_forecast.dart';
+import 'package:zentho/domain/services/recurrence_period.dart';
 import 'package:zentho/domain/services/supported_currencies.dart';
-import 'package:zentho/data/services/fx_rate_service.dart';
 
 void main() {
   group('BudgetForecast', () {
@@ -60,17 +61,78 @@ void main() {
         mainCurrency: 'USD',
         rates: rates,
         horizon: ForecastHorizon.y1,
+        recurrence: RecurrencePeriod.monthly,
         now: asOf,
       );
 
       expect(summary.series, isNotEmpty);
-      expect(summary.endOfMonthBalance, isNot(equals(summary.series.first.balance)));
-      expect(summary.monthlyNet, greaterThan(0));
-      // 12 months horizon => today + 12 points
-      expect(summary.series.length, 13);
+      expect(summary.series.first.date, asOf);
+      expect(summary.monthlyNet, isNot(0));
     });
 
-    test('short horizon samples daily points', () {
+    test('applies recurring transactions by cadence', () {
+      final owner = 'p1';
+      final account = Account.create(
+        name: 'Checking',
+        type: AccountType.checking,
+        currencyCode: 'USD',
+        ownerProfileId: owner,
+        visibility: VisibilityScope.shared,
+        openingBalance: 0,
+      );
+      final sub = SpendCategory.create(
+        name: 'Subs',
+        iconName: 'sub',
+        colorHex: 1,
+        isIncome: false,
+      );
+      final asOf = DateTime(2026, 8, 1);
+      final txs = [
+        MoneyTransaction.create(
+          type: TransactionType.expense,
+          amount: 10,
+          currencyCode: 'USD',
+          accountId: account.id,
+          categoryId: sub.id,
+          ownerProfileId: owner,
+          visibility: VisibilityScope.shared,
+          date: DateTime(2026, 7, 1),
+          isRecurring: true,
+          recurrencePeriod: RecurrencePeriod.monthly,
+          recurringLabel: 'Stream',
+        ),
+      ];
+
+      final monthly = BudgetForecast.project(
+        accounts: [account],
+        transactions: txs,
+        budgets: const [],
+        mainCurrency: 'USD',
+        rates: FxRateService.defaultRatesFor('USD'),
+        horizon: ForecastHorizon.y1,
+        recurrence: RecurrencePeriod.monthly,
+        now: asOf,
+      );
+
+      final weekly = BudgetForecast.project(
+        accounts: [account],
+        transactions: txs,
+        budgets: const [],
+        mainCurrency: 'USD',
+        rates: FxRateService.defaultRatesFor('USD'),
+        horizon: ForecastHorizon.y1,
+        recurrence: RecurrencePeriod.weekly,
+        now: asOf,
+      );
+
+      // Same underlying monthly bill; normalized recurring net differs by selector.
+      expect(monthly.recurringNetPerPeriod, closeTo(-10, 0.01));
+      expect(weekly.recurringNetPerPeriod.abs(), lessThan(10));
+      // Over a year, monthly recurrence should debit about 12 times.
+      expect(monthly.series.last.balance, closeTo(-120, 15));
+    });
+
+    test('short horizon samples with daily recurrence', () {
       final owner = 'p1';
       final account = Account.create(
         name: 'Cash',
@@ -87,6 +149,7 @@ void main() {
         mainCurrency: 'USD',
         rates: FxRateService.defaultRatesFor('USD'),
         horizon: ForecastHorizon.m1,
+        recurrence: RecurrencePeriod.daily,
         now: DateTime(2026, 8, 20),
       );
       expect(summary.series.length, greaterThan(2));
@@ -113,5 +176,10 @@ void main() {
         closeTo(1 / 1.151393, 0.001),
       );
     });
+  });
+
+  test('RecurrencePeriod defaults to monthly', () {
+    expect(RecurrencePeriod.tryParse(null), RecurrencePeriod.monthly);
+    expect(RecurrencePeriod.monthly.label, 'Monthly');
   });
 }

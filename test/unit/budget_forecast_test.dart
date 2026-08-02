@@ -7,7 +7,7 @@ import 'package:zentho/domain/services/supported_currencies.dart';
 
 void main() {
   group('BudgetForecast', () {
-    test('projects end of month and year from paced cash flow', () {
+    test('projects end of month using budgets, not one-off MTD velocity', () {
       final owner = 'p1';
       final account = Account.create(
         name: 'Checking',
@@ -40,6 +40,8 @@ void main() {
           ownerProfileId: owner,
           visibility: VisibilityScope.shared,
           date: DateTime(2026, 8, 1),
+          isRecurring: true,
+          recurrencePeriod: RecurrencePeriod.monthly,
         ),
         MoneyTransaction.create(
           type: TransactionType.expense,
@@ -52,12 +54,21 @@ void main() {
           date: DateTime(2026, 8, 10),
         ),
       ];
+      final budgets = [
+        BudgetCategory.create(
+          categoryId: food.id,
+          monthKey: '2026-08',
+          allocated: 900,
+          visibility: VisibilityScope.shared,
+          ownerProfileId: owner,
+        ),
+      ];
       final rates = FxRateService.defaultRatesFor('USD');
 
       final summary = BudgetForecast.project(
         accounts: [account],
         transactions: txs,
-        budgets: const [],
+        budgets: budgets,
         mainCurrency: 'USD',
         rates: rates,
         horizon: ForecastHorizon.y1,
@@ -67,7 +78,9 @@ void main() {
 
       expect(summary.series, isNotEmpty);
       expect(summary.series.first.date, asOf);
-      expect(summary.monthlyNet, isNot(0));
+      // Recurring +3000 minus budget plan 900.
+      expect(summary.monthlyNet, closeTo(2100, 0.01));
+      expect(summary.recurringNetPerPeriod, closeTo(3000, 0.01));
     });
 
     test('end of period follows horizon, not calendar year', () {

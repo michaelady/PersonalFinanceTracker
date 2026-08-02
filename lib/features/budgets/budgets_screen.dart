@@ -48,7 +48,8 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           Text('Budgets', style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 4),
           Text(
-            'Tap a budget to edit. Forecasts apply recurring cash flows by cadence.',
+            'Tap a budget to edit. Forecasts use recurring cadence plus planned '
+            'budget spend — not one-off month-to-date velocity.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 20),
@@ -360,6 +361,16 @@ class _PredictionCards extends StatelessWidget {
         _PredictTile(
           label: 'Projected monthly net',
           child: MoneyText(monthlyNet, currencyCode: currency, signed: true),
+        ),
+        const SizedBox(height: 4),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            'Recurring net minus this month’s budget plan',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: ZenthoColors.inkMuted,
+                ),
+          ),
         ),
         const SizedBox(height: 8),
         _PredictTile(

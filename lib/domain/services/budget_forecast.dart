@@ -49,7 +49,10 @@ class BudgetForecastSummary {
   final List<ForecastPoint> series;
 }
 
-/// Projects balances using non-recurring pace + explicit recurring cadence.
+/// Projects balances from current net worth using:
+/// - recurring transactions on their cadence
+/// - future-dated one-off transactions once
+/// - remaining / planned budget spend (not MTD velocity forever)
 abstract final class BudgetForecast {
   static BudgetForecastSummary project({
     required List<Account> accounts,
@@ -76,7 +79,7 @@ abstract final class BudgetForecast {
       asOf: asOf,
     );
 
-    final nonRecurringDaily = _nonRecurringDailyNet(
+    final plan = _NonRecurringPlan.build(
       transactions: transactions,
       budgets: budgets,
       mainCurrency: mainCurrency,
@@ -94,11 +97,35 @@ abstract final class BudgetForecast {
         ),
     ];
 
+    final oneOffs = [
+      for (final tx in transactions)
+        if (!tx.isRecurring && _dateOnly(tx.date).isAfter(asOf))
+          _OneOffFlow(
+            date: _dateOnly(tx.date),
+            amount: _signedMain(tx, mainCurrency, rates),
+          ),
+    ]..sort((a, b) => a.date.compareTo(b.date));
+
     final recurringNetPerPeriod = recurringTxs.fold<double>(0, (sum, tx) {
       final signed = _signedMain(tx, mainCurrency, rates);
       return sum +
           normalizeToPeriod(signed, tx.recurrencePeriod, recurrence, asOf);
     });
+
+    final recurringMonthly = recurringTxs.fold<double>(0, (sum, tx) {
+      final signed = _signedMain(tx, mainCurrency, rates);
+      return sum +
+          normalizeToPeriod(
+            signed,
+            tx.recurrencePeriod,
+            RecurrencePeriod.monthly,
+            asOf,
+          );
+    });
+
+    // Planned non-recurring spend is budget-based, not MTD extrapolation.
+    final monthlyNet = recurringMonthly - plan.steadyMonthlySpend;
+    final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day;
 
     var balance = current;
     double? endOfMonthBalance;
@@ -106,11 +133,18 @@ abstract final class BudgetForecast {
     double? endOfPeriodBalance;
     final series = <ForecastPoint>[ForecastPoint(date: asOf, balance: balance)];
     var nextSample = recurrence.addTo(asOf);
+    var oneOffIndex = 0;
 
     var day = asOf;
     while (day.isBefore(simEnd)) {
       day = day.add(const Duration(days: 1));
-      balance += nonRecurringDaily;
+      balance += plan.dailyFor(day);
+
+      while (oneOffIndex < oneOffs.length &&
+          !oneOffs[oneOffIndex].date.isAfter(day)) {
+        balance += oneOffs[oneOffIndex].amount;
+        oneOffIndex++;
+      }
 
       for (final flow in flows) {
         while (!flow.nextDue.isAfter(day)) {
@@ -135,7 +169,6 @@ abstract final class BudgetForecast {
       }
     }
 
-    // Ensure final horizon point exists.
     if (!_sameDay(series.last.date, horizonEnd) && !horizonEnd.isBefore(asOf)) {
       final atHorizon = series.lastWhere(
         (p) => !p.date.isAfter(horizonEnd),
@@ -152,15 +185,6 @@ abstract final class BudgetForecast {
       }
     }
 
-    final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day;
-    final monthlyNet = nonRecurringDaily * daysInMonth +
-        normalizeToPeriod(
-          recurringNetPerPeriod,
-          recurrence,
-          RecurrencePeriod.monthly,
-          asOf,
-        );
-
     final clipped = [
       for (final p in series)
         if (!p.date.isAfter(horizonEnd)) p,
@@ -169,7 +193,6 @@ abstract final class BudgetForecast {
     return BudgetForecastSummary(
       endOfMonthBalance: endOfMonthBalance ?? current,
       endOfPeriodBalance: endOfPeriodBalance ?? clipped.last.balance,
-      // Never fall back to horizon/sim end — that mislabeled "year" as period.
       endOfYearBalance: endOfYearBalance ?? endOfMonthBalance ?? current,
       monthlyNet: monthlyNet,
       dailyNet: monthlyNet / daysInMonth,
@@ -180,6 +203,8 @@ abstract final class BudgetForecast {
 
   static bool _sameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
+
+  static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
   static List<ForecastPoint> _downsample(
     List<ForecastPoint> points, {
@@ -266,8 +291,24 @@ abstract final class BudgetForecast {
         return daily * 365;
     }
   }
+}
 
-  static double _nonRecurringDailyNet({
+class _NonRecurringPlan {
+  _NonRecurringPlan({
+    required this.asOf,
+    required this.monthEnd,
+    required this.remainingThisMonthDaily,
+    required this.steadyDaily,
+    required this.steadyMonthlySpend,
+  });
+
+  final DateTime asOf;
+  final DateTime monthEnd;
+  final double remainingThisMonthDaily;
+  final double steadyDaily;
+  final double steadyMonthlySpend;
+
+  factory _NonRecurringPlan.build({
     required List<MoneyTransaction> transactions,
     required List<BudgetCategory> budgets,
     required String mainCurrency,
@@ -275,42 +316,68 @@ abstract final class BudgetForecast {
     required DateTime asOf,
   }) {
     final monthKey = MoneyMath.monthKey(asOf);
-    final nonRecurring = transactions.where((t) => !t.isRecurring).toList();
-    final income = MoneyMath.incomeInMonthMain(
-      transactions: nonRecurring,
-      monthKeyValue: monthKey,
-      mainCurrency: mainCurrency,
-      rates: rates,
-    );
-    final expense = MoneyMath.expenseInMonthMain(
-      transactions: nonRecurring,
-      monthKeyValue: monthKey,
-      mainCurrency: mainCurrency,
-      rates: rates,
-    );
-    final dayOfMonth = asOf.day.clamp(1, 31);
-    final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day;
-    final allocated = MoneyMath.totalBudgetAllocated(
-      budgets: budgets,
-      monthKeyValue: monthKey,
-    );
+    final monthEnd = DateTime(asOf.year, asOf.month + 1, 0);
+    final daysInMonth = monthEnd.day;
+    final daysLeft = (daysInMonth - asOf.day).clamp(0, 31);
 
-    double monthlyIncome;
-    double monthlyExpense;
-    if (income > 0 || expense > 0) {
-      monthlyIncome = income / dayOfMonth * daysInMonth;
-      monthlyExpense = expense / dayOfMonth * daysInMonth;
-      if (allocated > 0 && dayOfMonth <= 7) {
-        monthlyExpense = (monthlyExpense + allocated) / 2;
+    final monthBudgets =
+        budgets.where((b) => b.monthKey == monthKey).toList(growable: false);
+    final allocated = monthBudgets.fold<double>(0, (s, b) => s + b.allocated);
+    final budgetedIds = monthBudgets.map((b) => b.categoryId).toSet();
+
+    double amountOnOrBefore(MoneyTransaction tx) {
+      if (tx.type != TransactionType.expense) return 0;
+      if (MoneyMath.monthKey(tx.date) != monthKey) return 0;
+      if (tx.categoryId == null || !budgetedIds.contains(tx.categoryId)) {
+        return 0;
       }
-    } else if (allocated > 0) {
-      monthlyIncome = 0;
-      monthlyExpense = allocated;
-    } else {
-      monthlyIncome = 0;
-      monthlyExpense = 0;
+      return MoneyMath.toMain(
+        amount: tx.amount,
+        currencyCode: tx.currencyCode,
+        mainCurrency: mainCurrency,
+        rates: rates,
+        overrideRate: tx.exchangeRateToMain,
+      );
     }
-    return (monthlyIncome - monthlyExpense) / daysInMonth;
+
+    var spentToDate = 0.0;
+    var futureBudgetedOneOffs = 0.0;
+    for (final tx in transactions) {
+      final amount = amountOnOrBefore(tx);
+      if (amount <= 0) continue;
+      final day = DateTime(tx.date.year, tx.date.month, tx.date.day);
+      if (!day.isAfter(asOf)) {
+        spentToDate += amount;
+      } else if (!tx.isRecurring) {
+        // Future one-offs are applied explicitly; keep them out of daily burn.
+        futureBudgetedOneOffs += amount;
+      }
+    }
+
+    final remainingThisMonth =
+        (allocated - spentToDate - futureBudgetedOneOffs)
+            .clamp(0.0, double.infinity)
+            .toDouble();
+    final remainingDaily =
+        daysLeft == 0 ? 0.0 : -remainingThisMonth / daysLeft;
+    final steadyDaily = daysInMonth == 0 ? 0.0 : -allocated / daysInMonth;
+
+    return _NonRecurringPlan(
+      asOf: asOf,
+      monthEnd: monthEnd,
+      remainingThisMonthDaily: remainingDaily,
+      steadyDaily: steadyDaily,
+      steadyMonthlySpend: allocated,
+    );
+  }
+
+  /// Daily planned non-recurring burn for [day] (negative or zero).
+  double dailyFor(DateTime day) {
+    if (day.year == asOf.year && day.month == asOf.month) {
+      return remainingThisMonthDaily;
+    }
+    // Assume the current month's budget plan continues as a steady template.
+    return steadyDaily;
   }
 }
 
@@ -324,4 +391,11 @@ class _RecurringFlow {
   final double amount;
   final RecurrencePeriod period;
   DateTime nextDue;
+}
+
+class _OneOffFlow {
+  const _OneOffFlow({required this.date, required this.amount});
+
+  final DateTime date;
+  final double amount;
 }

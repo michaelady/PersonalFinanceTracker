@@ -1,5 +1,5 @@
 # zentho_export_v1
-# exported_at,2026-08-02T14:34:25.380Z
+# exported_at,2026-08-02T14:53:26.298Z
 # main_currency,CHF
 # tip,Import this file via Settings → Import CSV to replace all data. [ledger] and [account_balances] are ignored on import.
 
@@ -44,7 +44,7 @@ id,date,amount,type,currencyCode,accountId,accountName,categoryId,categoryName,o
 id,categoryId,categoryName,monthKey,allocated,visibility,ownerProfileId,rollover
 5d53302e-cb73-455d-b407-660ccd7145be,0804ff22-19c7-499a-9fc4-2cc100fdf8a5,Groceries,2026-08,450,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,true
 009d917a-2b30-4616-b241-3bbecc3ce7b3,bf8345a4-6633-409b-8af7-3bf42f8b2bbd,Subscriptions,2026-08,80,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,true
-a24b8e62-b499-4993-b180-7dcfd18987be,cf742a13-2d2b-4973-b277-ce28de077b3e,Housing,2026-08,100,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,true
+a24b8e62-b499-4993-b180-7dcfd18987be,cf742a13-2d2b-4973-b277-ce28de077b3e,Housing,2026-08,3000,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,true
 
 [goals]
 id,name,targetAmount,currentAmount,currencyCode,ownerProfileId,visibility,status,targetDate
@@ -53,14 +53,14 @@ ed029e70-b58c-4fd7-aa34-5f048408d0a6,Vacation,5000,50,CHF,411ed94d-b315-4daa-a98
 
 [rates]
 code,rateToMain,updatedAt
-USD,0.8101101749837978,2026-08-02T14:33:43.404Z
-EUR,0.9304056568663938,2026-08-02T14:33:43.404Z
-GBP,1.0872637919412007,2026-08-02T14:33:43.404Z
-JPY,0.005055611729019211,2026-08-02T14:33:43.404Z
-CAD,0.5769674590353104,2026-08-02T14:33:43.404Z
-AUD,0.5685371539030076,2026-08-02T14:33:43.404Z
-CHF,1,2026-08-02T14:33:43.404Z
-RON,0.1773301177471982,2026-08-02T14:33:43.404Z
+USD,0.8101101749837978,2026-08-02T14:47:49.790Z
+EUR,0.9304056568663938,2026-08-02T14:47:49.790Z
+GBP,1.0872637919412007,2026-08-02T14:47:49.790Z
+JPY,0.005055611729019211,2026-08-02T14:47:49.790Z
+CAD,0.5769674590353104,2026-08-02T14:47:49.790Z
+AUD,0.5685371539030076,2026-08-02T14:47:49.790Z
+CHF,1,2026-08-02T14:47:49.790Z
+RON,0.1773301177471982,2026-08-02T14:47:49.790Z
 
 [ledger]
 date,type,amount,currencyCode,rateToMain,amountInMain,signedAmountInMain,accountName,categoryName,visibility,ownerProfileId,note,isRecurring,recurrencePeriod,transactionId
@@ -74,6 +74,6 @@ date,type,amount,currencyCode,rateToMain,amountInMain,signedAmountInMain,account
 2026-07-07T00:00:00.000,expense,399,EUR,0.9304056568663938,371.2318570896911,-371.2318570896911,Main account,Health,shared,411ed94d-b315-4daa-a985-a2e9a52ff03d,AS.L.VCO. A.S.L. Verbano-Cusio-Ossola · €,false,monthly,9c937509-2964-4c89-97d1-8daca1ebef61
 
 [account_balances]
-accountId,accountName,currencyCode,openingBalance,balanceInMain,includeInNetWorth,archived,visibility
-6072030d-db45-4487-b727-7f0a9a4a6ebb,Main account,EUR,2500,7226.465154447338,true,false,shared
+accountId,accountName,currencyCode,openingBalance,balanceNative,balanceInMain,includeInNetWorth,archived,visibility
+6072030d-db45-4487-b727-7f0a9a4a6ebb,Main account,EUR,2500,7767.004747999999,7226.465154447338,true,false,shared
 

@@ -29,6 +29,14 @@ class HouseholdProfile extends Equatable {
     return HouseholdProfile(id: _uuid.v4(), name: name, colorHex: colorHex);
   }
 
+  HouseholdProfile copyWith({String? name, int? colorHex}) {
+    return HouseholdProfile(
+      id: id,
+      name: name ?? this.name,
+      colorHex: colorHex ?? this.colorHex,
+    );
+  }
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
@@ -613,6 +621,9 @@ class AppSettings extends Equatable {
     required this.onboardingComplete,
     this.showPrivate = true,
     this.showShared = true,
+    this.householdCloudId,
+    this.householdInviteKey,
+    this.householdUpdatedAt,
   });
 
   final String mainCurrency;
@@ -621,12 +632,30 @@ class AppSettings extends Equatable {
   final bool showPrivate;
   final bool showShared;
 
+  /// Remote household document id (jsonblob) when sharing is enabled.
+  final String? householdCloudId;
+
+  /// Secret required to join / write the shared household.
+  final String? householdInviteKey;
+
+  /// Last known household document revision timestamp (UTC).
+  final DateTime? householdUpdatedAt;
+
+  bool get householdSharingEnabled =>
+      householdCloudId != null &&
+      householdCloudId!.isNotEmpty &&
+      householdInviteKey != null &&
+      householdInviteKey!.isNotEmpty;
+
   AppSettings copyWith({
     String? mainCurrency,
     String? activeProfileId,
     bool? onboardingComplete,
     bool? showPrivate,
     bool? showShared,
+    Object? householdCloudId = _copyKeep,
+    Object? householdInviteKey = _copyKeep,
+    Object? householdUpdatedAt = _copyKeep,
   }) {
     return AppSettings(
       mainCurrency: mainCurrency ?? this.mainCurrency,
@@ -634,6 +663,15 @@ class AppSettings extends Equatable {
       onboardingComplete: onboardingComplete ?? this.onboardingComplete,
       showPrivate: showPrivate ?? this.showPrivate,
       showShared: showShared ?? this.showShared,
+      householdCloudId: identical(householdCloudId, _copyKeep)
+          ? this.householdCloudId
+          : householdCloudId as String?,
+      householdInviteKey: identical(householdInviteKey, _copyKeep)
+          ? this.householdInviteKey
+          : householdInviteKey as String?,
+      householdUpdatedAt: identical(householdUpdatedAt, _copyKeep)
+          ? this.householdUpdatedAt
+          : householdUpdatedAt as DateTime?,
     );
   }
 
@@ -643,6 +681,9 @@ class AppSettings extends Equatable {
         'onboardingComplete': onboardingComplete,
         'showPrivate': showPrivate,
         'showShared': showShared,
+        'householdCloudId': householdCloudId,
+        'householdInviteKey': householdInviteKey,
+        'householdUpdatedAt': householdUpdatedAt?.toIso8601String(),
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
@@ -652,12 +693,25 @@ class AppSettings extends Equatable {
       onboardingComplete: json['onboardingComplete'] as bool? ?? false,
       showPrivate: json['showPrivate'] as bool? ?? true,
       showShared: json['showShared'] as bool? ?? true,
+      householdCloudId: json['householdCloudId'] as String?,
+      householdInviteKey: json['householdInviteKey'] as String?,
+      householdUpdatedAt: json['householdUpdatedAt'] == null
+          ? null
+          : DateTime.tryParse(json['householdUpdatedAt'] as String)?.toUtc(),
     );
   }
 
   @override
-  List<Object?> get props =>
-      [mainCurrency, activeProfileId, onboardingComplete, showPrivate, showShared];
+  List<Object?> get props => [
+        mainCurrency,
+        activeProfileId,
+        onboardingComplete,
+        showPrivate,
+        showShared,
+        householdCloudId,
+        householdInviteKey,
+        householdUpdatedAt,
+      ];
 }
 
 class FinanceSnapshot extends Equatable {
@@ -680,6 +734,19 @@ class FinanceSnapshot extends Equatable {
   final List<BudgetCategory> budgets;
   final List<SavingsGoal> goals;
   final List<CurrencyRate> rates;
+
+  FinanceSnapshot copyWithSettings(AppSettings settings) {
+    return FinanceSnapshot(
+      settings: settings,
+      profiles: profiles,
+      accounts: accounts,
+      categories: categories,
+      transactions: transactions,
+      budgets: budgets,
+      goals: goals,
+      rates: rates,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'settings': settings.toJson(),

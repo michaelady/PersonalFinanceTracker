@@ -26,4 +26,9 @@ class LocalStore {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefsKey, raw);
   }
+
+  Future<void> clear() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_prefsKey);
+  }
 }

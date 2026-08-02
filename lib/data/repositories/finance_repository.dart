@@ -1,25 +1,34 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../domain/models/models.dart';
 import '../../domain/services/csv_data_exchange.dart';
 import '../../domain/services/csv_import_service.dart';
+import '../../domain/services/household_invite.dart';
 import '../../domain/services/money_math.dart';
 import '../../domain/services/recurrence_period.dart';
 import '../../domain/services/supported_currencies.dart';
 import '../persistence/local_store.dart';
 import '../services/fx_rate_service.dart';
+import '../services/household_cloud_store.dart';
 
 class FinanceRepository extends ChangeNotifier {
   FinanceRepository({
     LocalStore? store,
     FxRateService? fxService,
+    HouseholdCloudStore? householdCloud,
     this.refreshRatesOnInit = true,
   })  : _store = store ?? LocalStore(),
-        _fx = fxService ?? FxRateService();
+        _fx = fxService ?? FxRateService(),
+        _householdCloud = householdCloud ?? JsonBlobHouseholdCloudStore();
 
   final LocalStore _store;
   final FxRateService _fx;
+  final HouseholdCloudStore _householdCloud;
   final bool refreshRatesOnInit;
+  final _uuid = const Uuid();
 
   bool loading = true;
   String? error;
@@ -27,6 +36,12 @@ class FinanceRepository extends ChangeNotifier {
   String? ratesSource;
   DateTime? ratesUpdatedAt;
   String? ratesError;
+
+  bool householdSyncing = false;
+  String? householdSyncError;
+  String? householdSyncMessage;
+  Timer? _householdPushTimer;
+  bool _applyingRemote = false;
 
   late AppSettings settings;
   List<HouseholdProfile> profiles = [];
@@ -60,6 +75,9 @@ class FinanceRepository extends ChangeNotifier {
     // Online refresh at startup; keep offline defaults if it fails.
     if (refreshRatesOnInit) {
       await refreshRatesOnline();
+    }
+    if (settings.householdSharingEnabled) {
+      await syncHousehold(pullOnly: true);
     }
   }
 
@@ -230,6 +248,16 @@ class FinanceRepository extends ChangeNotifier {
   Future<void> _persist() async {
     await _store.save(snapshot);
     notifyListeners();
+    if (!_applyingRemote && settings.householdSharingEnabled) {
+      _scheduleHouseholdPush();
+    }
+  }
+
+  void _scheduleHouseholdPush() {
+    _householdPushTimer?.cancel();
+    _householdPushTimer = Timer(const Duration(milliseconds: 900), () {
+      unawaited(syncHousehold(pushOnly: true));
+    });
   }
 
   Future<void> completeOnboarding({
@@ -377,6 +405,301 @@ class FinanceRepository extends ChangeNotifier {
   Future<void> addProfile(String name) async {
     profiles = [...profiles, HouseholdProfile.create(name)];
     await _persist();
+  }
+
+  Future<void> updateProfile(HouseholdProfile profile) async {
+    profiles = [
+      for (final p in profiles)
+        if (p.id == profile.id) profile else p,
+    ];
+    await _persist();
+  }
+
+  Future<void> renameActiveProfile(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    final current = profiles.where((p) => p.id == settings.activeProfileId);
+    if (current.isEmpty) return;
+    await updateProfile(current.first.copyWith(name: trimmed));
+  }
+
+  /// Wipes all local data and returns the app to onboarding.
+  Future<void> clearAllData({bool deleteRemoteHousehold = true}) async {
+    _householdPushTimer?.cancel();
+    if (deleteRemoteHousehold && settings.householdSharingEnabled) {
+      try {
+        await _householdCloud.delete(settings.householdCloudId!);
+      } catch (_) {
+        // Local clear still proceeds if remote delete fails.
+      }
+    }
+    await _store.clear();
+    _seedEmpty();
+    householdSyncError = null;
+    householdSyncMessage = null;
+    await _store.save(snapshot);
+    notifyListeners();
+  }
+
+  HouseholdProfile? get activeProfile {
+    for (final p in profiles) {
+      if (p.id == settings.activeProfileId) return p;
+    }
+    return profiles.isEmpty ? null : profiles.first;
+  }
+
+  String? householdShareLink({Uri? base}) {
+    if (!settings.householdSharingEnabled) return null;
+    return HouseholdInvite.buildShareLink(
+      cloudId: settings.householdCloudId!,
+      inviteKey: settings.householdInviteKey!,
+      base: base,
+    );
+  }
+
+  /// Creates (or refreshes) a shareable household cloud document.
+  Future<String> enableHouseholdSharing({Uri? base}) async {
+    householdSyncing = true;
+    householdSyncError = null;
+    notifyListeners();
+    try {
+      final inviteKey = settings.householdInviteKey?.isNotEmpty == true
+          ? settings.householdInviteKey!
+          : _uuid.v4().replaceAll('-', '').substring(0, 12);
+      final updatedAt = DateTime.now().toUtc();
+      final doc = HouseholdCloudDocument(
+        inviteKey: inviteKey,
+        updatedAt: updatedAt,
+        snapshot: snapshot.copyWithSettings(
+          settings.copyWith(
+            householdCloudId: settings.householdCloudId,
+            householdInviteKey: inviteKey,
+            householdUpdatedAt: updatedAt,
+          ),
+        ),
+      );
+
+      String cloudId;
+      if (settings.householdCloudId != null &&
+          settings.householdCloudId!.isNotEmpty) {
+        cloudId = settings.householdCloudId!;
+        try {
+          await _householdCloud.update(cloudId, doc.toJson());
+        } on StateError {
+          cloudId = await _householdCloud.create(doc.toJson());
+        }
+      } else {
+        cloudId = await _householdCloud.create(doc.toJson());
+      }
+
+      settings = settings.copyWith(
+        householdCloudId: cloudId,
+        householdInviteKey: inviteKey,
+        householdUpdatedAt: updatedAt,
+      );
+      // Persist local ids without immediately re-pushing.
+      _applyingRemote = true;
+      await _store.save(snapshot);
+      _applyingRemote = false;
+      householdSyncMessage = 'Household sharing on';
+      notifyListeners();
+      return HouseholdInvite.buildShareLink(
+        cloudId: cloudId,
+        inviteKey: inviteKey,
+        base: base,
+      );
+    } catch (e) {
+      householdSyncError = e.toString();
+      notifyListeners();
+      rethrow;
+    } finally {
+      householdSyncing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> disableHouseholdSharing({bool deleteRemote = false}) async {
+    _householdPushTimer?.cancel();
+    if (deleteRemote && settings.householdCloudId != null) {
+      try {
+        await _householdCloud.delete(settings.householdCloudId!);
+      } catch (_) {}
+    }
+    settings = settings.copyWith(
+      householdCloudId: null,
+      householdInviteKey: null,
+      householdUpdatedAt: null,
+    );
+    householdSyncMessage = 'Household sharing off';
+    householdSyncError = null;
+    _applyingRemote = true;
+    await _store.save(snapshot);
+    _applyingRemote = false;
+    notifyListeners();
+  }
+
+  /// Joins a household from an invite link / codes and becomes a new member.
+  Future<void> joinHousehold({
+    required String cloudId,
+    required String inviteKey,
+    required String displayName,
+  }) async {
+    householdSyncing = true;
+    householdSyncError = null;
+    notifyListeners();
+    try {
+      final raw = await _householdCloud.read(cloudId);
+      if (raw == null) {
+        throw StateError('Invite link expired or household not found');
+      }
+      final remote = HouseholdCloudDocument.fromJson(raw);
+      if (remote.inviteKey != inviteKey) {
+        throw StateError('Invite key does not match this household');
+      }
+
+      final name = displayName.trim().isEmpty ? 'Member' : displayName.trim();
+      final me = HouseholdProfile.create(name, colorHex: 0xFFE39B2E);
+      final remoteSnapshot = remote.snapshot;
+      final mergedProfiles = [...remoteSnapshot.profiles, me];
+
+      _applyingRemote = true;
+      _hydrate(
+        FinanceSnapshot(
+          settings: remoteSnapshot.settings.copyWith(
+            activeProfileId: me.id,
+            onboardingComplete: true,
+            householdCloudId: cloudId,
+            householdInviteKey: inviteKey,
+            householdUpdatedAt: remote.updatedAt,
+            showPrivate: true,
+            showShared: true,
+          ),
+          profiles: mergedProfiles,
+          accounts: remoteSnapshot.accounts,
+          categories: remoteSnapshot.categories,
+          transactions: remoteSnapshot.transactions,
+          budgets: remoteSnapshot.budgets,
+          goals: remoteSnapshot.goals,
+          rates: remoteSnapshot.rates,
+        ),
+      );
+      _ensureSupportedCurrencies();
+      await _store.save(snapshot);
+      _applyingRemote = false;
+
+      // Publish the new member so the host sees them.
+      await syncHousehold(pushOnly: true);
+      householdSyncMessage = 'Joined household as $name';
+    } catch (e) {
+      householdSyncError = e.toString();
+      notifyListeners();
+      rethrow;
+    } finally {
+      householdSyncing = false;
+      notifyListeners();
+    }
+  }
+
+  /// Pulls and/or pushes the shared household document (last-write-wins).
+  Future<void> syncHousehold({
+    bool pullOnly = false,
+    bool pushOnly = false,
+  }) async {
+    if (!settings.householdSharingEnabled) return;
+    if (householdSyncing && !pushOnly) return;
+
+    householdSyncing = true;
+    householdSyncError = null;
+    notifyListeners();
+    try {
+      final cloudId = settings.householdCloudId!;
+      final inviteKey = settings.householdInviteKey!;
+      final localActive = settings.activeProfileId;
+      final localUpdated = settings.householdUpdatedAt;
+
+      if (!pushOnly) {
+        final raw = await _householdCloud.read(cloudId);
+        if (raw != null) {
+          final remote = HouseholdCloudDocument.fromJson(raw);
+          if (remote.inviteKey != inviteKey) {
+            throw StateError('Remote household invite key mismatch');
+          }
+          final remoteIsNewer = localUpdated == null ||
+              remote.updatedAt.isAfter(localUpdated.add(const Duration(milliseconds: 1)));
+          if (remoteIsNewer) {
+            final keepActive = remote.snapshot.profiles
+                    .any((p) => p.id == localActive)
+                ? localActive
+                : remote.snapshot.settings.activeProfileId;
+            _applyingRemote = true;
+            _hydrate(
+              FinanceSnapshot(
+                settings: remote.snapshot.settings.copyWith(
+                  activeProfileId: keepActive,
+                  householdCloudId: cloudId,
+                  householdInviteKey: inviteKey,
+                  householdUpdatedAt: remote.updatedAt,
+                  onboardingComplete: true,
+                ),
+                profiles: remote.snapshot.profiles,
+                accounts: remote.snapshot.accounts,
+                categories: remote.snapshot.categories,
+                transactions: remote.snapshot.transactions,
+                budgets: remote.snapshot.budgets,
+                goals: remote.snapshot.goals,
+                rates: remote.snapshot.rates,
+              ),
+            );
+            _ensureSupportedCurrencies();
+            await _store.save(snapshot);
+            _applyingRemote = false;
+            householdSyncMessage = 'Household updated from link';
+          }
+        }
+      }
+
+      if (!pullOnly) {
+        final updatedAt = DateTime.now().toUtc();
+        final doc = HouseholdCloudDocument(
+          inviteKey: inviteKey,
+          updatedAt: updatedAt,
+          snapshot: snapshot.copyWithSettings(
+            settings.copyWith(
+              householdCloudId: cloudId,
+              householdInviteKey: inviteKey,
+              householdUpdatedAt: updatedAt,
+            ),
+          ),
+        );
+        try {
+          await _householdCloud.update(cloudId, doc.toJson());
+        } on StateError {
+          final newId = await _householdCloud.create(doc.toJson());
+          settings = settings.copyWith(
+            householdCloudId: newId,
+            householdUpdatedAt: updatedAt,
+          );
+          householdSyncMessage =
+              'Share link refreshed — copy the new link from User';
+          _applyingRemote = true;
+          await _store.save(snapshot);
+          _applyingRemote = false;
+          householdSyncing = false;
+          notifyListeners();
+          return;
+        }
+        settings = settings.copyWith(householdUpdatedAt: updatedAt);
+        _applyingRemote = true;
+        await _store.save(snapshot);
+        _applyingRemote = false;
+        householdSyncMessage = 'Household synced';
+      }
+    } catch (e) {
+      householdSyncError = e.toString();
+    } finally {
+      householdSyncing = false;
+      notifyListeners();
+    }
   }
 
   Future<void> addAccount(Account account) async {
@@ -593,5 +916,11 @@ class FinanceRepository extends ChangeNotifier {
       mainCurrency: settings.mainCurrency,
       rates: rates,
     );
+  }
+
+  @override
+  void dispose() {
+    _householdPushTimer?.cancel();
+    super.dispose();
   }
 }

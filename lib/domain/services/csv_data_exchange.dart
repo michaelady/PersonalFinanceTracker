@@ -95,6 +95,9 @@ abstract final class CsvDataExchange {
         'onboardingComplete',
         'showPrivate',
         'showShared',
+        'householdCloudId',
+        'householdInviteKey',
+        'householdUpdatedAt',
       ],
       [
         [
@@ -103,6 +106,9 @@ abstract final class CsvDataExchange {
           snapshot.settings.onboardingComplete,
           snapshot.settings.showPrivate,
           snapshot.settings.showShared,
+          snapshot.settings.householdCloudId ?? '',
+          snapshot.settings.householdInviteKey ?? '',
+          snapshot.settings.householdUpdatedAt?.toIso8601String() ?? '',
         ],
       ],
     );
@@ -567,12 +573,22 @@ abstract final class CsvDataExchange {
   }
 
   static AppSettings _parseSettings(Map<String, String> row) {
+    final cloudId = row['householdCloudId']?.trim();
+    final inviteKey = row['householdInviteKey']?.trim();
+    final updatedRaw = row['householdUpdatedAt']?.trim();
     return AppSettings(
       mainCurrency: _req(row, 'mainCurrency').toUpperCase(),
       activeProfileId: _req(row, 'activeProfileId'),
       onboardingComplete: _bool(row['onboardingComplete']),
       showPrivate: _bool(row['showPrivate'], fallback: true),
       showShared: _bool(row['showShared'], fallback: true),
+      householdCloudId:
+          (cloudId == null || cloudId.isEmpty) ? null : cloudId,
+      householdInviteKey:
+          (inviteKey == null || inviteKey.isEmpty) ? null : inviteKey,
+      householdUpdatedAt: (updatedRaw == null || updatedRaw.isEmpty)
+          ? null
+          : DateTime.tryParse(updatedRaw)?.toUtc(),
     );
   }
 

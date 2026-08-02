@@ -6,8 +6,10 @@ Personal finance tracker with household budgets, multi-currency conversion, shar
 
 - Offline-first local storage (no cloud login in v1)
 - Same-device household profiles with **Shared** / **Private** visibility
-- Main currency + per-account / per-transaction currency with offline FX rates
-- Hybrid budgeting and **Available to spend**
+- Main currency + per-account / per-transaction currency (**USD, EUR, GBP, JPY, CAD, AUD, CHF, RON**)
+- Online FX refresh at app/site start (Frankfurter → open.er-api fallback), offline defaults otherwise
+- Hybrid budgeting, **Available to spend**, end-of-month/year predictions, and multi-horizon forecast chart
+
 - Manual transactions + CSV import
 - Goals, recurring/subscription tracking, reports
 - Investments screen stub for upcoming portfolio features

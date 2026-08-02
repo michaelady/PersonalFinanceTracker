@@ -11,6 +11,27 @@ enum RecurrencePeriod {
   final String label;
   final int approxDays;
 
+  /// Average length of one cycle in months (calendar-agnostic).
+  double get monthsPerCycle {
+    switch (this) {
+      case RecurrencePeriod.daily:
+        return 12 / 365.25;
+      case RecurrencePeriod.weekly:
+        return 12 / (365.25 / 7);
+      case RecurrencePeriod.monthly:
+        return 1;
+      case RecurrencePeriod.twoMonths:
+        return 2;
+      case RecurrencePeriod.quarter:
+        return 3;
+      case RecurrencePeriod.year:
+        return 12;
+    }
+  }
+
+  /// Convert a native-period amount into a monthly equivalent.
+  double toMonthly(double amount) => amount / monthsPerCycle;
+
   static RecurrencePeriod tryParse(String? raw) {
     if (raw == null) return RecurrencePeriod.monthly;
     return RecurrencePeriod.values.firstWhere(

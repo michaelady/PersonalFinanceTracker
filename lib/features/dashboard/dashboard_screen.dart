@@ -25,12 +25,14 @@ class DashboardScreen extends StatelessWidget {
       monthKeyValue: month,
       mainCurrency: currency,
       rates: repo.rates,
+      includeExpectedRecurring: true,
     );
     final expense = MoneyMath.expenseInMonthMain(
       transactions: repo.visibleTransactions,
       monthKeyValue: month,
       mainCurrency: currency,
       rates: repo.rates,
+      includeExpectedRecurring: true,
     );
     final recurring = MoneyMath.recurringCandidates(repo.visibleTransactions);
     final recent = repo.visibleTransactions.take(5).toList();
@@ -57,8 +59,8 @@ class DashboardScreen extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'This month’s calm number — income minus expenses '
-            '(budget overspend counted once).',
+            'This month’s calm number — income minus expenses, including '
+            'recurring items even if last booked in another month.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 24),

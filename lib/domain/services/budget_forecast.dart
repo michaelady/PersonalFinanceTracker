@@ -56,16 +56,14 @@ class BudgetForecastSummary {
   }
 }
 
-/// Projects balances from current net worth.
+/// Monthly cashflow forecast.
 ///
-/// Conservative monthly expense plan:
-///   recurring expenses
-///   + category budgets (planned spend)
-///   + typical unbudgeted one-off spend
+/// Planned monthly net = recurring income − (recurring expenses + budgets +
+/// typical unbudgeted one-offs).
 ///
-/// This intentionally keeps budgets even when a recurring bill exists in the
-/// same category, so incomplete discretionary tracking does not inflate the
-/// surplus. Recurring income/expenses still land on their real dates.
+/// All horizon balances use the same monthly step:
+///   balance(n) = current + monthlyNet × n
+/// so “1 year” is exactly current + monthlyNet × 12.
 abstract final class BudgetForecast {
   static BudgetForecastSummary project({
     required List<Account> accounts,
@@ -79,10 +77,6 @@ abstract final class BudgetForecast {
   }) {
     final rawNow = now ?? DateTime.now();
     final asOf = DateTime(rawNow.year, rawNow.month, rawNow.day);
-    final horizonEnd = DateTime(asOf.year, asOf.month + horizon.months, asOf.day);
-    final monthEnd = DateTime(asOf.year, asOf.month + 1, 0);
-    final yearEnd = DateTime(asOf.year, 12, 31);
-    final simEnd = _maxDate(horizonEnd, _maxDate(monthEnd, yearEnd));
 
     final current = MoneyMath.netWorthMain(
       accounts: accounts,
@@ -100,119 +94,43 @@ abstract final class BudgetForecast {
       asOf: asOf,
     );
 
+    final monthlyNet = plan.monthlyNet;
+    final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day;
+
     final recurringTxs = transactions.where((t) => t.isRecurring).toList();
-    final flows = [
-      for (final tx in recurringTxs)
-        _RecurringFlow(
-          amount: _signedMain(tx, mainCurrency, rates),
-          period: tx.recurrencePeriod,
-          nextDue: _nextDueAfter(tx.date, tx.recurrencePeriod, asOf),
-        ),
-    ];
-
-    final oneOffs = [
-      for (final tx in transactions)
-        if (!tx.isRecurring && _dateOnly(tx.date).isAfter(asOf))
-          _OneOffFlow(
-            date: _dateOnly(tx.date),
-            amount: _signedMain(tx, mainCurrency, rates),
-            coveredByBudgetBurn: tx.categoryId != null &&
-                plan.budgetedCategoryIds.contains(tx.categoryId),
-          ),
-    ]..sort((a, b) => a.date.compareTo(b.date));
-
     final recurringNetPerPeriod = recurringTxs.fold<double>(0, (sum, tx) {
       final signed = _signedMain(tx, mainCurrency, rates);
       return sum +
           normalizeToPeriod(signed, tx.recurrencePeriod, recurrence, asOf);
     });
 
-    final monthlyNet = plan.monthlyNet;
-    final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day;
+    // Inclusive months left in the calendar year (Aug → Aug..Dec = 5).
+    final monthsToYearEnd = 12 - asOf.month + 1;
 
-    var balance = current;
-    double? endOfMonthBalance;
-    double? endOfYearBalance;
-    double? endOfPeriodBalance;
-    final series = <ForecastPoint>[ForecastPoint(date: asOf, balance: balance)];
-    var nextSample = recurrence.addTo(asOf);
-    var oneOffIndex = 0;
+    final endOfMonthBalance = current + monthlyNet;
+    final endOfYearBalance = current + monthlyNet * monthsToYearEnd;
+    final endOfPeriodBalance = current + monthlyNet * horizon.months;
 
-    var day = asOf;
-    while (day.isBefore(simEnd)) {
-      day = day.add(const Duration(days: 1));
-      balance += plan.dailyFor(day);
-
-      while (oneOffIndex < oneOffs.length &&
-          !oneOffs[oneOffIndex].date.isAfter(day)) {
-        final oneOff = oneOffs[oneOffIndex];
-        if (!oneOff.coveredByBudgetBurn) {
-          balance += oneOff.amount;
-        }
-        oneOffIndex++;
-      }
-
-      for (final flow in flows) {
-        while (!flow.nextDue.isAfter(day)) {
-          balance += flow.amount;
-          flow.nextDue = flow.period.addTo(flow.nextDue);
-        }
-      }
-
-      if (_sameDay(day, monthEnd)) endOfMonthBalance = balance;
-      if (_sameDay(day, yearEnd)) endOfYearBalance = balance;
-      if (_sameDay(day, horizonEnd)) endOfPeriodBalance = balance;
-
-      final onHorizonEnd = _sameDay(day, horizonEnd);
-      if ((!day.isBefore(nextSample) && !day.isAfter(horizonEnd)) ||
-          onHorizonEnd) {
-        if (!series.any((p) => _sameDay(p.date, day))) {
-          series.add(ForecastPoint(date: day, balance: balance));
-        }
-        while (!nextSample.isAfter(day)) {
-          nextSample = recurrence.addTo(nextSample);
-        }
-      }
-    }
-
-    if (!_sameDay(series.last.date, horizonEnd) && !horizonEnd.isBefore(asOf)) {
-      final atHorizon = series.lastWhere(
-        (p) => !p.date.isAfter(horizonEnd),
-        orElse: () => series.first,
-      );
-      endOfPeriodBalance ??= atHorizon.balance;
-      if (!_sameDay(atHorizon.date, horizonEnd)) {
-        series.add(
-          ForecastPoint(
-            date: horizonEnd,
-            balance: endOfPeriodBalance,
-          ),
-        );
-      }
-    }
-
-    final clipped = [
-      for (final p in series)
-        if (!p.date.isAfter(horizonEnd)) p,
+    final series = <ForecastPoint>[
+      for (var i = 0; i <= horizon.months; i++)
+        ForecastPoint(
+          date: DateTime(asOf.year, asOf.month + i, asOf.day),
+          balance: current + monthlyNet * i,
+        ),
     ];
 
     return BudgetForecastSummary(
-      endOfMonthBalance: endOfMonthBalance ?? current,
-      endOfPeriodBalance: endOfPeriodBalance ?? clipped.last.balance,
-      endOfYearBalance: endOfYearBalance ?? endOfMonthBalance ?? current,
+      endOfMonthBalance: endOfMonthBalance,
+      endOfPeriodBalance: endOfPeriodBalance,
+      endOfYearBalance: endOfYearBalance,
       monthlyNet: monthlyNet,
       dailyNet: monthlyNet / daysInMonth,
       recurringNetPerPeriod: recurringNetPerPeriod,
       recurringIncomeMonthly: plan.recurringIncomeMonthly,
       plannedExpensesMonthly: plan.plannedExpensesMonthly,
-      series: _downsample(clipped, maxPoints: 180),
+      series: _downsample(series, maxPoints: 180),
     );
   }
-
-  static bool _sameDay(DateTime a, DateTime b) =>
-      a.year == b.year && a.month == b.month && a.day == b.day;
-
-  static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
   static List<ForecastPoint> _downsample(
     List<ForecastPoint> points, {
@@ -228,8 +146,6 @@ abstract final class BudgetForecast {
     return result;
   }
 
-  static DateTime _maxDate(DateTime a, DateTime b) => a.isAfter(b) ? a : b;
-
   static double _signedMain(
     MoneyTransaction tx,
     String mainCurrency,
@@ -243,18 +159,6 @@ abstract final class BudgetForecast {
       overrideRate: tx.exchangeRateToMain,
     );
     return tx.type == TransactionType.expense ? -main : main;
-  }
-
-  static DateTime _nextDueAfter(
-    DateTime anchor,
-    RecurrencePeriod period,
-    DateTime asOf,
-  ) {
-    var due = DateTime(anchor.year, anchor.month, anchor.day);
-    for (var i = 0; i < 100000 && !due.isAfter(asOf); i++) {
-      due = period.addTo(due);
-    }
-    return due;
   }
 
   static double normalizeToPeriod(
@@ -303,20 +207,12 @@ abstract final class BudgetForecast {
 
 class _CashflowPlan {
   _CashflowPlan({
-    required this.asOf,
-    required this.budgetedCategoryIds,
     required this.recurringIncomeMonthly,
     required this.plannedExpensesMonthly,
-    required this.remainingThisMonthDaily,
-    required this.steadyDaily,
   });
 
-  final DateTime asOf;
-  final Set<String> budgetedCategoryIds;
   final double recurringIncomeMonthly;
   final double plannedExpensesMonthly;
-  final double remainingThisMonthDaily;
-  final double steadyDaily;
 
   double get monthlyNet => recurringIncomeMonthly - plannedExpensesMonthly;
 
@@ -328,9 +224,6 @@ class _CashflowPlan {
     required DateTime asOf,
   }) {
     final monthKey = MoneyMath.monthKey(asOf);
-    final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day;
-    final daysLeft = (daysInMonth - asOf.day).clamp(0, 31);
-
     final monthBudgets =
         budgets.where((b) => b.monthKey == monthKey).toList(growable: false);
     final budgetedIds = monthBudgets.map((b) => b.categoryId).toSet();
@@ -360,7 +253,6 @@ class _CashflowPlan {
       }
     }
 
-    // Typical monthly one-offs outside budgeted categories.
     final nrByMonth = <String, double>{};
     for (final tx in transactions) {
       if (tx.isRecurring || tx.type != TransactionType.expense) continue;
@@ -374,94 +266,10 @@ class _CashflowPlan {
         ? 0.0
         : nrByMonth.values.reduce((a, b) => a + b) / nrByMonth.length;
 
-    final plannedExpenses =
-        recurringExpenses + allocated + unbudgetedNrAvg;
-
-    // Rest-of-month budget burn: only non-recurring spend reduces the
-    // remaining envelope, so already-paid rent does not zero out planned
-    // housing/grocery spend for the rest of the month.
-    var nonRecurringBudgetedToDate = 0.0;
-    var futureNonRecurringBudgeted = 0.0;
-    for (final tx in transactions) {
-      if (tx.isRecurring || tx.type != TransactionType.expense) continue;
-      if (MoneyMath.monthKey(tx.date) != monthKey) continue;
-      if (tx.categoryId == null || !budgetedIds.contains(tx.categoryId)) {
-        continue;
-      }
-      final amount = toMainAmount(tx);
-      final day = DateTime(tx.date.year, tx.date.month, tx.date.day);
-      if (day.isAfter(asOf)) {
-        futureNonRecurringBudgeted += amount;
-      } else {
-        nonRecurringBudgetedToDate += amount;
-      }
-    }
-    final remainingBudgets = (allocated -
-            nonRecurringBudgetedToDate -
-            futureNonRecurringBudgeted)
-        .clamp(0.0, double.infinity)
-        .toDouble();
-
-    var unbudgetedNrSpentToDate = 0.0;
-    for (final tx in transactions) {
-      if (tx.isRecurring || tx.type != TransactionType.expense) continue;
-      if (MoneyMath.monthKey(tx.date) != monthKey) continue;
-      final budgeted =
-          tx.categoryId != null && budgetedIds.contains(tx.categoryId);
-      if (budgeted) continue;
-      final day = DateTime(tx.date.year, tx.date.month, tx.date.day);
-      if (day.isAfter(asOf)) continue;
-      unbudgetedNrSpentToDate += toMainAmount(tx);
-    }
-    final remainingUnbudgetedNr = (unbudgetedNrAvg - unbudgetedNrSpentToDate)
-        .clamp(0.0, double.infinity)
-        .toDouble();
-
-    final remainingThisMonth = remainingBudgets + remainingUnbudgetedNr;
-    final remainingDaily =
-        daysLeft == 0 ? 0.0 : -remainingThisMonth / daysLeft;
-    final steadyDaily = daysInMonth == 0
-        ? 0.0
-        : -(allocated + unbudgetedNrAvg) / daysInMonth;
-
     return _CashflowPlan(
-      asOf: asOf,
-      budgetedCategoryIds: budgetedIds,
       recurringIncomeMonthly: recurringIncome,
-      plannedExpensesMonthly: plannedExpenses,
-      remainingThisMonthDaily: remainingDaily,
-      steadyDaily: steadyDaily,
+      plannedExpensesMonthly:
+          recurringExpenses + allocated + unbudgetedNrAvg,
     );
   }
-
-  double dailyFor(DateTime day) {
-    if (day.year == asOf.year && day.month == asOf.month) {
-      return remainingThisMonthDaily;
-    }
-    return steadyDaily;
-  }
-}
-
-class _RecurringFlow {
-  _RecurringFlow({
-    required this.amount,
-    required this.period,
-    required this.nextDue,
-  });
-
-  final double amount;
-  final RecurrencePeriod period;
-  DateTime nextDue;
-}
-
-class _OneOffFlow {
-  const _OneOffFlow({
-    required this.date,
-    required this.amount,
-    required this.coveredByBudgetBurn,
-  });
-
-  final DateTime date;
-  final double amount;
-  final bool coveredByBudgetBurn;
 }

@@ -48,8 +48,8 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           Text('Budgets', style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 4),
           Text(
-            'Tap a budget to edit. Forecasts use recurring bills, your budgets, '
-            'and typical unbudgeted one-offs from recent months.',
+            'Tap a budget to edit. Forecasts use a monthly net '
+            '(income − expenses); 1 year = today + monthly net × 12.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 20),
@@ -384,6 +384,16 @@ class _PredictionCards extends StatelessWidget {
         _PredictTile(
           label: 'Projected monthly net',
           child: MoneyText(monthlyNet, currencyCode: currency, signed: true),
+        ),
+        const SizedBox(height: 4),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            'End of period = today’s net worth + monthly net × months',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: ZenthoColors.inkMuted,
+                ),
+          ),
         ),
         if (highSavingsRate) ...[
           const SizedBox(height: 8),

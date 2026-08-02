@@ -196,7 +196,7 @@ void main() {
       expect(monthly.series.last.balance, closeTo(-120, 15));
     });
 
-    test('short horizon samples with daily recurrence', () {
+    test('short horizon has start and end monthly points', () {
       final owner = 'p1';
       final account = Account.create(
         name: 'Cash',
@@ -216,7 +216,54 @@ void main() {
         recurrence: RecurrencePeriod.daily,
         now: DateTime(2026, 8, 20),
       );
-      expect(summary.series.length, greaterThan(2));
+      expect(summary.series, hasLength(2));
+      expect(summary.endOfPeriodBalance, closeTo(500, 0.01));
+    });
+
+    test('period end is exactly current plus monthly net times months', () {
+      final owner = 'p1';
+      final account = Account.create(
+        name: 'Checking',
+        type: AccountType.checking,
+        currencyCode: 'USD',
+        ownerProfileId: owner,
+        visibility: VisibilityScope.shared,
+        openingBalance: 1000,
+      );
+      final salary = SpendCategory.create(
+        name: 'Salary',
+        iconName: 'pay',
+        colorHex: 1,
+        isIncome: true,
+      );
+      final asOf = DateTime(2026, 8, 2);
+      final txs = [
+        MoneyTransaction.create(
+          type: TransactionType.income,
+          amount: 500,
+          currencyCode: 'USD',
+          accountId: account.id,
+          categoryId: salary.id,
+          ownerProfileId: owner,
+          visibility: VisibilityScope.shared,
+          date: DateTime(2026, 7, 2),
+          isRecurring: true,
+          recurrencePeriod: RecurrencePeriod.monthly,
+        ),
+      ];
+      final summary = BudgetForecast.project(
+        accounts: [account],
+        transactions: txs,
+        budgets: const [],
+        mainCurrency: 'USD',
+        rates: FxRateService.defaultRatesFor('USD'),
+        horizon: ForecastHorizon.y1,
+        recurrence: RecurrencePeriod.monthly,
+        now: asOf,
+      );
+      // Opening 1000 + already-booked July salary 500 = current 1500.
+      expect(summary.monthlyNet, closeTo(500, 0.01));
+      expect(summary.endOfPeriodBalance, closeTo(1500 + 500 * 12, 0.01));
     });
   });
 

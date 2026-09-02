@@ -339,6 +339,15 @@ class _InvestmentsPreview extends StatelessWidget {
                     signed: true,
                   ),
                 ],
+                if (portfolio.realizedPlMain != 0 ||
+                    portfolio.dividendMain != 0) ...[
+                  const SizedBox(height: 4),
+                  MoneyText(
+                    portfolio.realizedPlMain + portfolio.dividendMain,
+                    currencyCode: currency,
+                    signed: true,
+                  ),
+                ],
               ],
             ),
     );

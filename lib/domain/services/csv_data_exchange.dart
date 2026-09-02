@@ -44,6 +44,7 @@ class CsvFullImportResult {
 /// ...
 /// [holdings]
 /// ...
+/// [share_transactions]  # optional; holdings are derived from this ledger
 /// [rates]
 /// ...
 /// [ledger]          # export-only, denormalized for spreadsheet debugging
@@ -300,6 +301,35 @@ abstract final class CsvDataExchange {
     );
 
     writeSection(
+      'share_transactions',
+      const [
+        'id',
+        'holdingId',
+        'type',
+        'date',
+        'shares',
+        'pricePerShare',
+        'amount',
+        'fee',
+        'notes',
+      ],
+      [
+        for (final t in snapshot.shareTransactions)
+          [
+            t.id,
+            t.holdingId,
+            t.type.name,
+            t.date.toIso8601String(),
+            t.shares,
+            t.pricePerShare,
+            t.amount,
+            t.fee,
+            t.notes,
+          ],
+      ],
+    );
+
+    writeSection(
       'rates',
       const ['code', 'rateToMain', 'updatedAt'],
       [
@@ -444,6 +474,10 @@ abstract final class CsvDataExchange {
       for (final row in _rowsOf(sections['holdings'] ?? const []))
         _parseHolding(row),
     ];
+    final shareTransactions = [
+      for (final row in _rowsOf(sections['share_transactions'] ?? const []))
+        _parseShareTransaction(row),
+    ]..sort((a, b) => b.date.compareTo(a.date));
     final rates = [
       for (final row in _rowsOf(sections['rates'] ?? const [])) _parseRate(row),
     ];
@@ -462,6 +496,7 @@ abstract final class CsvDataExchange {
         budgets: budgets,
         goals: goals,
         holdings: holdings,
+        shareTransactions: shareTransactions,
         rates: rates,
       ),
       warnings: warnings,
@@ -755,6 +790,20 @@ abstract final class CsvDataExchange {
       accountId: (accountId == null || accountId.isEmpty) ? null : accountId,
       notes: row['notes']?.trim() ?? '',
       includeInNetWorth: _bool(row['includeInNetWorth'], fallback: true),
+    );
+  }
+
+  static ShareTransaction _parseShareTransaction(Map<String, String> row) {
+    return ShareTransaction(
+      id: _req(row, 'id'),
+      holdingId: _req(row, 'holdingId'),
+      type: ShareTransactionType.values.byName(_req(row, 'type').toLowerCase()),
+      date: DateTime.parse(_req(row, 'date')),
+      shares: _double(row['shares']),
+      pricePerShare: _double(row['pricePerShare']),
+      amount: _double(row['amount']),
+      fee: _double(row['fee']),
+      notes: row['notes']?.trim() ?? '',
     );
   }
 

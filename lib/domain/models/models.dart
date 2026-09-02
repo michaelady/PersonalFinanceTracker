@@ -14,6 +14,9 @@ enum TransactionType { income, expense, transfer }
 
 enum GoalStatus { active, completed, paused }
 
+/// Share/ETF lot activity. Holdings are derived from this ledger (average cost).
+enum ShareTransactionType { buy, sell, dividend, fee, split }
+
 class HouseholdProfile extends Equatable {
   const HouseholdProfile({
     required this.id,
@@ -742,6 +745,124 @@ class InvestmentHolding extends Equatable {
       ];
 }
 
+class ShareTransaction extends Equatable {
+  const ShareTransaction({
+    required this.id,
+    required this.holdingId,
+    required this.type,
+    required this.date,
+    this.shares = 0,
+    this.pricePerShare = 0,
+    this.amount = 0,
+    this.fee = 0,
+    this.notes = '',
+  });
+
+  final String id;
+  final String holdingId;
+  final ShareTransactionType type;
+  final DateTime date;
+
+  /// Buy/sell quantity. For [ShareTransactionType.split], the ratio
+  /// (e.g. `2` for a 2-for-1 split, `0.5` for a 1-for-2 reverse split).
+  final double shares;
+
+  /// Native price per share for buys and sells.
+  final double pricePerShare;
+
+  /// Cash for dividends and standalone fees. Ignored for buy/sell/split.
+  final double amount;
+
+  /// Commission on a buy or sell, in the holding currency.
+  final double fee;
+  final String notes;
+
+  factory ShareTransaction.create({
+    required String holdingId,
+    required ShareTransactionType type,
+    DateTime? date,
+    double shares = 0,
+    double pricePerShare = 0,
+    double amount = 0,
+    double fee = 0,
+    String notes = '',
+  }) {
+    return ShareTransaction(
+      id: _uuid.v4(),
+      holdingId: holdingId,
+      type: type,
+      date: date ?? DateTime.now(),
+      shares: shares,
+      pricePerShare: pricePerShare,
+      amount: amount,
+      fee: fee,
+      notes: notes,
+    );
+  }
+
+  ShareTransaction copyWith({
+    String? holdingId,
+    ShareTransactionType? type,
+    DateTime? date,
+    double? shares,
+    double? pricePerShare,
+    double? amount,
+    double? fee,
+    String? notes,
+  }) {
+    return ShareTransaction(
+      id: id,
+      holdingId: holdingId ?? this.holdingId,
+      type: type ?? this.type,
+      date: date ?? this.date,
+      shares: shares ?? this.shares,
+      pricePerShare: pricePerShare ?? this.pricePerShare,
+      amount: amount ?? this.amount,
+      fee: fee ?? this.fee,
+      notes: notes ?? this.notes,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'holdingId': holdingId,
+        'type': type.name,
+        'date': date.toIso8601String(),
+        'shares': shares,
+        'pricePerShare': pricePerShare,
+        'amount': amount,
+        'fee': fee,
+        'notes': notes,
+      };
+
+  factory ShareTransaction.fromJson(Map<String, dynamic> json) {
+    return ShareTransaction(
+      id: json['id'] as String,
+      holdingId: json['holdingId'] as String,
+      type: ShareTransactionType.values.byName(json['type'] as String),
+      date: DateTime.parse(json['date'] as String),
+      shares: (json['shares'] as num?)?.toDouble() ?? 0,
+      pricePerShare: (json['pricePerShare'] as num?)?.toDouble() ?? 0,
+      amount: (json['amount'] as num?)?.toDouble() ?? 0,
+      fee: (json['fee'] as num?)?.toDouble() ?? 0,
+      notes: json['notes'] as String? ?? '',
+    );
+  }
+
+  @override
+  List<Object?> get props => [
+        id,
+        holdingId,
+        type,
+        date,
+        shares,
+        pricePerShare,
+        amount,
+        fee,
+        notes,
+      ];
+}
+
 class PricePoint extends Equatable {
   const PricePoint({required this.date, required this.close});
 
@@ -984,6 +1105,7 @@ class FinanceSnapshot extends Equatable {
     required this.goals,
     required this.rates,
     this.holdings = const [],
+    this.shareTransactions = const [],
   });
 
   final AppSettings settings;
@@ -995,6 +1117,7 @@ class FinanceSnapshot extends Equatable {
   final List<SavingsGoal> goals;
   final List<CurrencyRate> rates;
   final List<InvestmentHolding> holdings;
+  final List<ShareTransaction> shareTransactions;
 
   FinanceSnapshot copyWithSettings(AppSettings settings) {
     return FinanceSnapshot(
@@ -1007,6 +1130,33 @@ class FinanceSnapshot extends Equatable {
       goals: goals,
       rates: rates,
       holdings: holdings,
+      shareTransactions: shareTransactions,
+    );
+  }
+
+  FinanceSnapshot copyWith({
+    AppSettings? settings,
+    List<HouseholdProfile>? profiles,
+    List<Account>? accounts,
+    List<SpendCategory>? categories,
+    List<MoneyTransaction>? transactions,
+    List<BudgetCategory>? budgets,
+    List<SavingsGoal>? goals,
+    List<CurrencyRate>? rates,
+    List<InvestmentHolding>? holdings,
+    List<ShareTransaction>? shareTransactions,
+  }) {
+    return FinanceSnapshot(
+      settings: settings ?? this.settings,
+      profiles: profiles ?? this.profiles,
+      accounts: accounts ?? this.accounts,
+      categories: categories ?? this.categories,
+      transactions: transactions ?? this.transactions,
+      budgets: budgets ?? this.budgets,
+      goals: goals ?? this.goals,
+      rates: rates ?? this.rates,
+      holdings: holdings ?? this.holdings,
+      shareTransactions: shareTransactions ?? this.shareTransactions,
     );
   }
 
@@ -1020,6 +1170,7 @@ class FinanceSnapshot extends Equatable {
         'goals': goals.map((e) => e.toJson()).toList(),
         'rates': rates.map((e) => e.toJson()).toList(),
         'holdings': holdings.map((e) => e.toJson()).toList(),
+        'shareTransactions': shareTransactions.map((e) => e.toJson()).toList(),
       };
 
   factory FinanceSnapshot.fromJson(Map<String, dynamic> json) {
@@ -1053,6 +1204,13 @@ class FinanceSnapshot extends Equatable {
               )
               .toList() ??
           const [],
+      shareTransactions: (json['shareTransactions'] as List?)
+              ?.map(
+                (e) =>
+                    ShareTransaction.fromJson(e as Map<String, dynamic>),
+              )
+              .toList() ??
+          const [],
     );
   }
 
@@ -1067,5 +1225,6 @@ class FinanceSnapshot extends Equatable {
         goals,
         rates,
         holdings,
+        shareTransactions,
       ];
 }

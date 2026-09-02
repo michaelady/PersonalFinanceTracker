@@ -79,6 +79,14 @@ void main() {
         visibility: VisibilityScope.shared,
         notes: 'ISA',
       );
+      final shareTx = ShareTransaction.create(
+        holdingId: holding.id,
+        type: ShareTransactionType.buy,
+        date: DateTime.utc(2026, 7, 1),
+        shares: 12.5,
+        pricePerShare: 110.2,
+        notes: 'Opening position',
+      );
       final snapshot = FinanceSnapshot(
         settings: AppSettings(
           mainCurrency: 'CHF',
@@ -94,6 +102,7 @@ void main() {
         budgets: [budget],
         goals: [goal],
         holdings: [holding],
+        shareTransactions: [shareTx],
         rates: const [
           CurrencyRate(code: 'CHF', rateToMain: 1),
           CurrencyRate(code: 'EUR', rateToMain: 0.93),
@@ -122,6 +131,8 @@ void main() {
       expect(imported.snapshot.goals.single.currencyCode, 'EUR');
       expect(imported.snapshot.holdings.single.ticker, 'VWCE.DE');
       expect(imported.snapshot.holdings.single.shares, 12.5);
+      expect(imported.snapshot.shareTransactions.single.type, ShareTransactionType.buy);
+      expect(imported.snapshot.shareTransactions.single.shares, 12.5);
       expect(imported.snapshot.rates.where((r) => r.code == 'EUR').single.rateToMain, 0.93);
 
       final restoredExpense = imported.snapshot.transactions

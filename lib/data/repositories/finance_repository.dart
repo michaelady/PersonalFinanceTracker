@@ -12,6 +12,7 @@ import '../../domain/services/money_math.dart';
 import '../../domain/services/portfolio_math.dart';
 import '../../domain/services/recurrence_period.dart';
 import '../../domain/services/supported_currencies.dart';
+import '../../domain/services/yahoo_lots_csv.dart';
 import '../auth/auth_service.dart';
 import '../persistence/firestore_household_cloud_store.dart';
 import '../persistence/local_store.dart';
@@ -96,6 +97,7 @@ class FinanceRepository extends ChangeNotifier {
   List<SavingsGoal> goals = [];
   List<CurrencyRate> rates = [];
   List<InvestmentHolding> holdings = [];
+  List<ShareTransaction> shareTransactions = [];
   Map<String, CachedQuote> quotes = {};
   String? finnhubToken;
   String? alphaVantageToken;
@@ -157,6 +159,9 @@ class FinanceRepository extends ChangeNotifier {
     goals = [...snapshot.goals];
     rates = [...snapshot.rates];
     holdings = [...snapshot.holdings];
+    shareTransactions = [...snapshot.shareTransactions]
+      ..sort((a, b) => b.date.compareTo(a.date));
+    _syncHoldingsFromLedger();
   }
 
   void _seedEmpty() {
@@ -177,6 +182,7 @@ class FinanceRepository extends ChangeNotifier {
     budgets = [];
     goals = [];
     holdings = [];
+    shareTransactions = [];
   }
 
   void _ensureSupportedCurrencies() {
@@ -311,6 +317,7 @@ class FinanceRepository extends ChangeNotifier {
         goals: goals,
         rates: rates,
         holdings: holdings,
+        shareTransactions: shareTransactions,
       );
 
   AuthUser? get signedInUser => _auth.currentUser;
@@ -323,7 +330,8 @@ class FinanceRepository extends ChangeNotifier {
       transactions.isNotEmpty ||
       budgets.isNotEmpty ||
       goals.isNotEmpty ||
-      holdings.isNotEmpty;
+      holdings.isNotEmpty ||
+      shareTransactions.isNotEmpty;
 
   Future<void> _persist() async {
     await _writeLocalSnapshot();
@@ -789,6 +797,7 @@ class FinanceRepository extends ChangeNotifier {
           goals: remoteSnapshot.goals,
           rates: remoteSnapshot.rates,
           holdings: remoteSnapshot.holdings,
+          shareTransactions: remoteSnapshot.shareTransactions,
         ),
       );
       _ensureSupportedCurrencies();
@@ -857,6 +866,7 @@ class FinanceRepository extends ChangeNotifier {
                 goals: remote.snapshot.goals,
                 rates: remote.snapshot.rates,
                 holdings: remote.snapshot.holdings,
+                shareTransactions: remote.snapshot.shareTransactions,
               ),
             );
             _ensureSupportedCurrencies();
@@ -1032,16 +1042,37 @@ class FinanceRepository extends ChangeNotifier {
 
   Future<void> addHolding(InvestmentHolding holding) async {
     holdings = [...holdings, holding];
+    if (holding.shares > 0) {
+      shareTransactions = [
+        PortfolioMath.openingBuyFor(holding),
+        ...shareTransactions,
+      ]..sort((a, b) => b.date.compareTo(a.date));
+    }
+    _syncHoldingsFromLedger();
     _ensureRateFor(holding.currencyCode);
     await _persist();
     await refreshQuotes(symbols: [holding.ticker], force: true);
   }
 
   Future<void> updateHolding(InvestmentHolding holding) async {
+    final previous = holdings.where((h) => h.id == holding.id);
+    final existing = previous.isEmpty ? null : previous.first;
+    final hasLedger = shareTransactions.any((t) => t.holdingId == holding.id);
     holdings = [
       for (final h in holdings)
-        if (h.id == holding.id) holding else h,
+        if (h.id == holding.id)
+          hasLedger
+              ? holding.copyWith(
+                  shares: existing?.shares ?? holding.shares,
+                  averageCostPerShare:
+                      existing?.averageCostPerShare ??
+                      holding.averageCostPerShare,
+                )
+              : holding
+        else
+          h,
     ];
+    _syncHoldingsFromLedger();
     _ensureRateFor(holding.currencyCode);
     await _persist();
     await refreshQuotes(symbols: [holding.ticker]);
@@ -1049,7 +1080,160 @@ class FinanceRepository extends ChangeNotifier {
 
   Future<void> deleteHolding(String id) async {
     holdings = holdings.where((h) => h.id != id).toList();
+    shareTransactions =
+        shareTransactions.where((t) => t.holdingId != id).toList();
     await _persist();
+  }
+
+  InvestmentHolding? holdingById(String id) {
+    for (final h in holdings) {
+      if (h.id == id) return h;
+    }
+    return null;
+  }
+
+  void _syncHoldingsFromLedger() {
+    holdings = PortfolioMath.holdingsWithLedger(holdings, shareTransactions);
+  }
+
+  Future<String?> addShareTransaction(ShareTransaction tx) async {
+    final holding = holdingById(tx.holdingId);
+    if (holding == null) return 'Choose a holding';
+    var next = [...shareTransactions];
+    final hasLedger = next.any((t) => t.holdingId == holding.id);
+    if (!hasLedger && holding.shares > 0) {
+      next = [
+        PortfolioMath.openingBuyFor(
+          holding,
+          date: tx.date.subtract(const Duration(seconds: 1)),
+        ),
+        ...next,
+      ];
+    }
+    next = [tx, ...next];
+    final error = PortfolioMath.validateShareLedger(
+      holding: holding,
+      transactions: next,
+    );
+    if (error != null) return error;
+    shareTransactions = next..sort((a, b) => b.date.compareTo(a.date));
+    _syncHoldingsFromLedger();
+    _ensureRateFor(holding.currencyCode);
+    await _persist();
+    await refreshQuotes(symbols: [holding.ticker]);
+    return null;
+  }
+
+  Future<String?> updateShareTransaction(ShareTransaction tx) async {
+    final holding = holdingById(tx.holdingId);
+    if (holding == null) return 'Choose a holding';
+    final next = [
+      for (final t in shareTransactions)
+        if (t.id == tx.id) tx else t,
+    ];
+    final error = PortfolioMath.validateShareLedger(
+      holding: holding,
+      transactions: next,
+    );
+    if (error != null) return error;
+    shareTransactions = next..sort((a, b) => b.date.compareTo(a.date));
+    _syncHoldingsFromLedger();
+    _ensureRateFor(holding.currencyCode);
+    await _persist();
+    await refreshQuotes(symbols: [holding.ticker]);
+    return null;
+  }
+
+  Future<String?> deleteShareTransaction(String id) async {
+    ShareTransaction? target;
+    for (final t in shareTransactions) {
+      if (t.id == id) {
+        target = t;
+        break;
+      }
+    }
+    if (target == null) return null;
+    final holding = holdingById(target.holdingId);
+    final next = shareTransactions.where((t) => t.id != id).toList();
+    if (holding != null) {
+      final error = PortfolioMath.validateShareLedger(
+        holding: holding,
+        transactions: next,
+      );
+      if (error != null) return error;
+    }
+    shareTransactions = next;
+    _syncHoldingsFromLedger();
+    await _persist();
+    return null;
+  }
+
+  /// Creates a ticker shell (if needed) then records [tx] against it.
+  Future<String?> addShareTransactionForTicker({
+    required String ticker,
+    required String displayName,
+    required String currencyCode,
+    required VisibilityScope visibility,
+    String? accountId,
+    bool includeInNetWorth = true,
+    required ShareTransactionType type,
+    required DateTime date,
+    double shares = 0,
+    double pricePerShare = 0,
+    double amount = 0,
+    double fee = 0,
+    String notes = '',
+    String? holdingId,
+  }) async {
+    final symbol = ticker.trim().toUpperCase();
+    if ((holdingId == null || holdingId.isEmpty) && symbol.isEmpty) {
+      return 'Enter a ticker';
+    }
+
+    InvestmentHolding? holding =
+        holdingId == null ? null : holdingById(holdingId);
+    if (holding == null && symbol.isNotEmpty) {
+      for (final h in holdings) {
+        if (h.ticker == symbol &&
+            h.ownerProfileId == settings.activeProfileId) {
+          holding = h;
+          break;
+        }
+      }
+    }
+
+    var created = false;
+    if (holding == null) {
+      holding = InvestmentHolding.create(
+        ticker: symbol,
+        displayName: displayName.trim().isEmpty ? symbol : displayName.trim(),
+        shares: 0,
+        averageCostPerShare: 0,
+        currencyCode: currencyCode,
+        ownerProfileId: settings.activeProfileId,
+        visibility: visibility,
+        accountId: accountId,
+        includeInNetWorth: includeInNetWorth,
+      );
+      created = true;
+    }
+
+    final tx = ShareTransaction.create(
+      holdingId: holding.id,
+      type: type,
+      date: date,
+      shares: shares,
+      pricePerShare: pricePerShare,
+      amount: amount,
+      fee: fee,
+      notes: notes,
+    );
+    if (created) holdings = [...holdings, holding];
+    final error = await addShareTransaction(tx);
+    if (error != null && created) {
+      holdings = holdings.where((h) => h.id != holding!.id).toList();
+    }
+    return error;
   }
 
   Future<void> setFinnhubToken(String? token) async {
@@ -1209,11 +1393,23 @@ class FinanceRepository extends ChangeNotifier {
     return result;
   }
 
-  /// Auto-detects full multi-section export vs bank-style transaction CSV.
-  Future<CsvImportOutcome> importCsv(String csvBody) async {
+  /// Auto-detects full multi-section export, Yahoo Finance lots, or
+  /// bank-style transaction CSV.
+  Future<CsvImportOutcome> importCsv(
+    String csvBody, {
+    bool refreshQuotesAfter = true,
+  }) async {
     if (CsvDataExchange.looksLikeFullExport(csvBody)) {
       final full = await importFullCsv(csvBody);
       return CsvImportOutcome.full(full);
+    }
+
+    if (YahooLotsCsv.looksLike(csvBody)) {
+      final lots = await importYahooLots(
+        csvBody,
+        refreshQuotesAfter: refreshQuotesAfter,
+      );
+      return CsvImportOutcome.yahooLots(lots);
     }
 
     final result = CsvImportService.parse(
@@ -1229,6 +1425,135 @@ class FinanceRepository extends ChangeNotifier {
       await _persist();
     }
     return CsvImportOutcome.transactions(result);
+  }
+
+  /// Merges Yahoo Finance lots CSV into the share ledger. Duplicates
+  /// (same symbol + trade date + type + qty + price + commission) are skipped.
+  Future<YahooLotsImportResult> importYahooLots(
+    String csvBody, {
+    bool refreshQuotesAfter = true,
+  }) async {
+    final parsed = YahooLotsCsv.parse(csvBody);
+    if (parsed.lots.isEmpty) {
+      return YahooLotsImportResult(
+        imported: 0,
+        skippedDuplicates: 0,
+        skippedRows: parsed.skippedRows,
+        createdHoldings: 0,
+        errors: parsed.errors,
+      );
+    }
+
+    final fingerprints = <String>{};
+    for (final t in shareTransactions) {
+      fingerprints.add(t.id);
+      final holding = holdingById(t.holdingId);
+      if (holding == null) continue;
+      fingerprints.add(
+        YahooLotsCsv.fingerprint(
+          symbol: holding.ticker,
+          date: t.date,
+          type: t.type,
+          shares: t.shares,
+          price: t.pricePerShare,
+          fee: t.fee,
+        ),
+      );
+    }
+
+    var nextHoldings = [...holdings];
+    var nextTxs = [...shareTransactions];
+    var createdHoldings = 0;
+    var skippedDuplicates = 0;
+    var skippedInvalid = 0;
+    final errors = [...parsed.errors];
+    final imported = <ShareTransaction>[];
+
+    InvestmentHolding? existingHolding(String symbol) {
+      for (final h in nextHoldings) {
+        if (h.ticker.toUpperCase() == symbol) return h;
+      }
+      return null;
+    }
+
+    for (final lot in parsed.lots) {
+      if (fingerprints.contains(lot.fingerprint) ||
+          fingerprints.contains(lot.id)) {
+        skippedDuplicates++;
+        continue;
+      }
+      var created = false;
+      var holding = existingHolding(lot.symbol);
+      if (holding == null) {
+        holding = InvestmentHolding.create(
+          ticker: lot.symbol,
+          displayName: lot.symbol,
+          shares: 0,
+          averageCostPerShare: 0,
+          currencyCode: YahooLotsCsv.currencyForSymbol(
+            lot.symbol,
+            settings.mainCurrency,
+          ),
+          ownerProfileId: settings.activeProfileId,
+          visibility: VisibilityScope.shared,
+        );
+        created = true;
+      }
+      final tx = ShareTransaction(
+        id: lot.id,
+        holdingId: holding.id,
+        type: lot.type,
+        date: lot.date,
+        shares: lot.shares,
+        pricePerShare: lot.pricePerShare,
+        fee: lot.fee,
+        notes: lot.comment,
+      );
+      final candidate = [tx, ...nextTxs];
+      final error = PortfolioMath.validateShareLedger(
+        holding: holding,
+        transactions: candidate,
+      );
+      if (error != null) {
+        skippedInvalid++;
+        errors.add('Row ${lot.sourceRow} (${lot.symbol}): $error');
+        continue;
+      }
+      if (created) {
+        nextHoldings = [...nextHoldings, holding];
+        createdHoldings++;
+        _ensureRateFor(holding.currencyCode);
+      }
+      nextTxs = candidate;
+      imported.add(tx);
+      fingerprints
+        ..add(lot.fingerprint)
+        ..add(lot.id);
+    }
+
+    holdings = nextHoldings;
+    shareTransactions = nextTxs..sort((a, b) => b.date.compareTo(a.date));
+    _syncHoldingsFromLedger();
+    if (imported.isNotEmpty) {
+      await _persist();
+      if (refreshQuotesAfter) {
+        unawaited(
+          refreshQuotes(
+            symbols:
+                {for (final t in imported) holdingById(t.holdingId)?.ticker}
+                    .whereType<String>(),
+          ),
+        );
+      }
+    }
+
+    return YahooLotsImportResult(
+      imported: imported.length,
+      skippedDuplicates: skippedDuplicates,
+      skippedRows: parsed.skippedRows + skippedInvalid,
+      createdHoldings: createdHoldings,
+      errors: errors,
+    );
   }
 
   List<Account> get visibleAccounts => MoneyMath.filterVisible(
@@ -1276,11 +1601,20 @@ class FinanceRepository extends ChangeNotifier {
         showPrivate: settings.showPrivate,
       ).toList();
 
+  List<ShareTransaction> get visibleShareTransactions {
+    final ids = {for (final h in visibleHoldings) h.id};
+    return [
+      for (final t in shareTransactions)
+        if (ids.contains(t.holdingId)) t,
+    ]..sort((a, b) => b.date.compareTo(a.date));
+  }
+
   PortfolioTotals get portfolio => PortfolioMath.summarize(
         holdings: visibleHoldings,
         quotes: quotes,
         mainCurrency: settings.mainCurrency,
         rates: rates,
+        shareTransactions: shareTransactions,
       );
 
   double get netWorth =>
@@ -1296,6 +1630,7 @@ class FinanceRepository extends ChangeNotifier {
         quotes: quotes,
         mainCurrency: settings.mainCurrency,
         rates: rates,
+        shareTransactions: shareTransactions,
       );
 
   double availableToSpend([DateTime? date]) {

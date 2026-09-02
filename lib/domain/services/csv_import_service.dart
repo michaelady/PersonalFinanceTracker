@@ -2,6 +2,7 @@ import 'package:csv/csv.dart';
 
 import '../models/models.dart';
 import 'csv_data_exchange.dart';
+import 'yahoo_lots_csv.dart';
 
 class CsvImportResult {
   const CsvImportResult({
@@ -15,13 +16,14 @@ class CsvImportResult {
   final List<String> errors;
 }
 
-/// Result of Settings CSV import — either a full snapshot replace or
-/// a transaction append.
+/// Result of Settings CSV import — either a full snapshot replace,
+/// a bank-style transaction append, or a Yahoo Finance lots merge.
 class CsvImportOutcome {
   const CsvImportOutcome._({
     required this.isFullReplace,
     this.transactions,
     this.full,
+    this.yahooLots,
   });
 
   factory CsvImportOutcome.transactions(CsvImportResult result) {
@@ -32,9 +34,14 @@ class CsvImportOutcome {
     return CsvImportOutcome._(isFullReplace: true, full: result);
   }
 
+  factory CsvImportOutcome.yahooLots(YahooLotsImportResult result) {
+    return CsvImportOutcome._(isFullReplace: false, yahooLots: result);
+  }
+
   final bool isFullReplace;
   final CsvImportResult? transactions;
   final CsvFullImportResult? full;
+  final YahooLotsImportResult? yahooLots;
 }
 
 /// Expects headers: date,amount,type,category,account,note,currency,visibility

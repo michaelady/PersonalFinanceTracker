@@ -12,6 +12,58 @@ enum QuoteHistoryRange {
   final String chartLabel;
 }
 
+class ShareLedgerException implements Exception {
+  const ShareLedgerException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// Average-cost lot after applying [ShareTransaction]s in date order.
+///
+/// Buys raise quantity and cost basis (price × shares + fee). Sells reduce
+/// quantity at the current average cost and realize P/L (proceeds − cost of
+/// shares sold − fee). Dividends are cash income (not a cost-basis change).
+/// Standalone fees add to remaining cost basis, or reduce realized P/L when
+/// the position is flat. Splits multiply quantity and leave cost basis as-is.
+class SharePosition {
+  const SharePosition({
+    required this.shares,
+    required this.averageCostPerShare,
+    required this.costNative,
+    required this.realizedPlNative,
+    required this.dividendNative,
+    required this.investedNative,
+    required this.proceedsNative,
+  });
+
+  final double shares;
+  final double averageCostPerShare;
+  final double costNative;
+  final double realizedPlNative;
+  final double dividendNative;
+  final double investedNative;
+  final double proceedsNative;
+
+  double get totalRealizedNative => realizedPlNative + dividendNative;
+
+  factory SharePosition.fromHolding(InvestmentHolding holding) {
+    final shares = holding.shares;
+    final avg = holding.averageCostPerShare;
+    final cost = shares * avg;
+    return SharePosition(
+      shares: shares,
+      averageCostPerShare: avg,
+      costNative: cost,
+      realizedPlNative: 0,
+      dividendNative: 0,
+      investedNative: cost,
+      proceedsNative: 0,
+    );
+  }
+}
+
 class HoldingValuation {
   const HoldingValuation({
     required this.holding,
@@ -28,6 +80,11 @@ class HoldingValuation {
     this.dayChangeMain,
     this.dayChangePercent,
     this.allocationPercent = 0,
+    this.realizedPlMain = 0,
+    this.dividendMain = 0,
+    this.investedMain = 0,
+    this.totalPlMain,
+    this.totalPlPercent,
   });
 
   final InvestmentHolding holding;
@@ -44,6 +101,11 @@ class HoldingValuation {
   final double? dayChangeMain;
   final double? dayChangePercent;
   final double allocationPercent;
+  final double realizedPlMain;
+  final double dividendMain;
+  final double investedMain;
+  final double? totalPlMain;
+  final double? totalPlPercent;
 
   /// Market value when a quote exists, otherwise cost — used for net worth.
   double get valueForNetWorthMain => marketMain ?? costMain;
@@ -64,6 +126,11 @@ class HoldingValuation {
       dayChangeMain: dayChangeMain,
       dayChangePercent: dayChangePercent,
       allocationPercent: percent,
+      realizedPlMain: realizedPlMain,
+      dividendMain: dividendMain,
+      investedMain: investedMain,
+      totalPlMain: totalPlMain,
+      totalPlPercent: totalPlPercent,
     );
   }
 }
@@ -80,6 +147,11 @@ class PortfolioTotals {
     this.quotedAt,
     this.quoteSource,
     this.usedCachedQuotes = false,
+    this.realizedPlMain = 0,
+    this.dividendMain = 0,
+    this.investedMain = 0,
+    this.totalPlMain,
+    this.totalPlPercent,
   });
 
   final List<HoldingValuation> holdings;
@@ -92,6 +164,11 @@ class PortfolioTotals {
   final DateTime? quotedAt;
   final String? quoteSource;
   final bool usedCachedQuotes;
+  final double realizedPlMain;
+  final double dividendMain;
+  final double investedMain;
+  final double? totalPlMain;
+  final double? totalPlPercent;
 }
 
 /// Pure portfolio calculations — unit-tested, no Flutter / network.
@@ -123,6 +200,229 @@ abstract final class PortfolioMath {
     return amount * _rate(currencyCode, mainCurrency, rates);
   }
 
+  static const qtyEpsilon = 1e-10;
+
+  static List<ShareTransaction> transactionsForHolding(
+    String holdingId,
+    List<ShareTransaction> transactions,
+  ) {
+    final out = [
+      for (final t in transactions)
+        if (t.holdingId == holdingId) t,
+    ]..sort((a, b) {
+        final byDate = a.date.compareTo(b.date);
+        if (byDate != 0) return byDate;
+        return a.id.compareTo(b.id);
+      });
+    return out;
+  }
+
+  static ShareTransaction openingBuyFor(
+    InvestmentHolding holding, {
+    DateTime? date,
+    String notes = 'Opening position',
+  }) {
+    return ShareTransaction.create(
+      holdingId: holding.id,
+      type: ShareTransactionType.buy,
+      date: date ?? DateTime.now(),
+      shares: holding.shares,
+      pricePerShare: holding.averageCostPerShare,
+      notes: notes,
+    );
+  }
+
+  /// Chronological average-cost application. When [strict] is true, invalid
+  /// quantities throw [ShareLedgerException]; otherwise sells are clamped to
+  /// shares held so stored ledgers still display.
+  static SharePosition positionFor({
+    required InvestmentHolding holding,
+    List<ShareTransaction> transactions = const [],
+    DateTime? asOf,
+    bool strict = false,
+  }) {
+    final txs = [
+      for (final t in transactionsForHolding(holding.id, transactions))
+        if (asOf == null || !t.date.isAfter(asOf)) t,
+    ];
+    if (txs.isEmpty) return SharePosition.fromHolding(holding);
+
+    var quantity = 0.0;
+    var costBasis = 0.0;
+    var realized = 0.0;
+    var dividends = 0.0;
+    var invested = 0.0;
+    var proceeds = 0.0;
+
+    void zeroIfFlat() {
+      if (quantity.abs() <= qtyEpsilon) {
+        quantity = 0;
+        costBasis = 0;
+      }
+    }
+
+    for (final tx in txs) {
+      switch (tx.type) {
+        case ShareTransactionType.buy:
+          if (tx.shares <= 0) {
+            if (strict) {
+              throw const ShareLedgerException('Buy quantity must be positive');
+            }
+            break;
+          }
+          if (tx.pricePerShare < 0) {
+            if (strict) {
+              throw const ShareLedgerException('Buy price cannot be negative');
+            }
+            break;
+          }
+          final buyCost = tx.shares * tx.pricePerShare + tx.fee;
+          quantity += tx.shares;
+          costBasis += buyCost;
+          invested += buyCost;
+        case ShareTransactionType.sell:
+          if (tx.shares <= 0) {
+            if (strict) {
+              throw const ShareLedgerException(
+                'Sell quantity must be positive',
+              );
+            }
+            break;
+          }
+          if (tx.pricePerShare < 0) {
+            if (strict) {
+              throw const ShareLedgerException('Sell price cannot be negative');
+            }
+            break;
+          }
+          if (quantity <= qtyEpsilon) {
+            if (strict) {
+              throw const ShareLedgerException(
+                'Cannot sell shares from an empty position',
+              );
+            }
+            break;
+          }
+          var sold = tx.shares;
+          if (sold > quantity + qtyEpsilon) {
+            if (strict) {
+              throw ShareLedgerException(
+                'Cannot sell ${_trimQty(sold)} shares; only ${_trimQty(quantity)} held',
+              );
+            }
+            sold = quantity;
+          }
+          final avg = costBasis / quantity;
+          final soldCost = avg * sold;
+          final saleProceeds = sold * tx.pricePerShare - tx.fee;
+          realized += saleProceeds - soldCost;
+          proceeds += saleProceeds;
+          quantity -= sold;
+          costBasis -= soldCost;
+          zeroIfFlat();
+        case ShareTransactionType.dividend:
+          if (tx.amount < 0) {
+            if (strict) {
+              throw const ShareLedgerException(
+                'Dividend amount cannot be negative',
+              );
+            }
+            break;
+          }
+          dividends += tx.amount;
+        case ShareTransactionType.fee:
+          if (tx.amount <= 0) {
+            if (strict) {
+              throw const ShareLedgerException('Fee amount must be positive');
+            }
+            break;
+          }
+          if (quantity > qtyEpsilon) {
+            costBasis += tx.amount;
+            invested += tx.amount;
+          } else {
+            realized -= tx.amount;
+          }
+        case ShareTransactionType.split:
+          if (tx.shares <= 0) {
+            if (strict) {
+              throw const ShareLedgerException(
+                'Split ratio must be greater than zero',
+              );
+            }
+            break;
+          }
+          quantity *= tx.shares;
+          zeroIfFlat();
+      }
+    }
+
+    zeroIfFlat();
+    final avg = quantity <= qtyEpsilon ? 0.0 : costBasis / quantity;
+    return SharePosition(
+      shares: quantity,
+      averageCostPerShare: avg,
+      costNative: costBasis,
+      realizedPlNative: realized,
+      dividendNative: dividends,
+      investedNative: invested,
+      proceedsNative: proceeds,
+    );
+  }
+
+  static String? validateShareLedger({
+    required InvestmentHolding holding,
+    required List<ShareTransaction> transactions,
+  }) {
+    try {
+      positionFor(
+        holding: holding,
+        transactions: transactions,
+        strict: true,
+      );
+      return null;
+    } on ShareLedgerException catch (e) {
+      return e.message;
+    }
+  }
+
+  static InvestmentHolding holdingWithLedger(
+    InvestmentHolding holding,
+    List<ShareTransaction> transactions,
+  ) {
+    final position = positionFor(holding: holding, transactions: transactions);
+    return holding.copyWith(
+      shares: position.shares,
+      averageCostPerShare: position.averageCostPerShare,
+    );
+  }
+
+  static List<InvestmentHolding> holdingsWithLedger(
+    List<InvestmentHolding> holdings,
+    List<ShareTransaction> transactions,
+  ) {
+    return [
+      for (final h in holdings) holdingWithLedger(h, transactions),
+    ];
+  }
+
+  static double sharesOnDate({
+    required InvestmentHolding holding,
+    required DateTime asOf,
+    List<ShareTransaction> transactions = const [],
+  }) {
+    return positionFor(
+      holding: holding,
+      transactions: transactions,
+      asOf: asOf,
+    ).shares;
+  }
+
+  static String _trimQty(double value) {
+    if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+    return value.toStringAsFixed(4);
+  }
+
   static CachedQuote? quoteFor(
     InvestmentHolding holding,
     Map<String, CachedQuote> quotes,
@@ -135,25 +435,87 @@ abstract final class PortfolioMath {
     required Map<String, CachedQuote> quotes,
     required String mainCurrency,
     required List<CurrencyRate> rates,
+    SharePosition? position,
+    List<ShareTransaction> shareTransactions = const [],
   }) {
+    final pos = position ??
+        positionFor(holding: holding, transactions: shareTransactions);
+    final lot = holding.copyWith(
+      shares: pos.shares,
+      averageCostPerShare: pos.averageCostPerShare,
+    );
     final quote = quoteFor(holding, quotes);
-    final costNative = holding.shares * holding.averageCostPerShare;
+    final costNative = pos.costNative;
     final costMain = toMain(
       costNative,
       holding.currencyCode,
       mainCurrency,
       rates,
     );
-    if (quote == null) {
+    final realizedMain = toMain(
+      pos.realizedPlNative,
+      holding.currencyCode,
+      mainCurrency,
+      rates,
+    );
+    final dividendMain = toMain(
+      pos.dividendNative,
+      holding.currencyCode,
+      mainCurrency,
+      rates,
+    );
+    final investedMain = toMain(
+      pos.investedNative,
+      holding.currencyCode,
+      mainCurrency,
+      rates,
+    );
+
+    HoldingValuation finish({
+      required String quoteCurrency,
+      double? lastPrice,
+      DateTime? quotedAt,
+      String? quoteSource,
+      double? marketNative,
+      double? marketMain,
+      double? unrealizedPlMain,
+      double? unrealizedPlPercent,
+      double? dayChangeMain,
+      double? dayChangePercent,
+    }) {
+      final totalPl = (unrealizedPlMain ?? 0) + realizedMain + dividendMain;
+      final totalPct =
+          investedMain == 0 ? null : (totalPl / investedMain) * 100;
       return HoldingValuation(
-        holding: holding,
+        holding: lot,
         costNative: costNative,
         costMain: costMain,
-        quoteCurrency: holding.currencyCode,
+        quoteCurrency: quoteCurrency,
+        lastPrice: lastPrice,
+        quotedAt: quotedAt,
+        quoteSource: quoteSource,
+        marketNative: marketNative,
+        marketMain: marketMain,
+        unrealizedPlMain: unrealizedPlMain,
+        unrealizedPlPercent: unrealizedPlPercent,
+        dayChangeMain: dayChangeMain,
+        dayChangePercent: dayChangePercent,
+        realizedPlMain: realizedMain,
+        dividendMain: dividendMain,
+        investedMain: investedMain,
+        totalPlMain: totalPl,
+        totalPlPercent: totalPct,
       );
     }
 
-    final marketNative = holding.shares * quote.price;
+    if (quote == null) {
+      return finish(
+        quoteCurrency: holding.currencyCode,
+        unrealizedPlMain: pos.shares.abs() <= qtyEpsilon ? 0 : null,
+      );
+    }
+
+    final marketNative = pos.shares * quote.price;
     final marketMain = toMain(
       marketNative,
       quote.currency,
@@ -165,19 +527,16 @@ abstract final class PortfolioMath {
 
     double? dayChangeNative;
     if (quote.previousClose != null) {
-      dayChangeNative = holding.shares * (quote.price - quote.previousClose!);
+      dayChangeNative = pos.shares * (quote.price - quote.previousClose!);
     } else if (quote.changePercent != null) {
       final denom = 1 + (quote.changePercent! / 100);
       if (denom != 0) {
         final previous = quote.price / denom;
-        dayChangeNative = holding.shares * (quote.price - previous);
+        dayChangeNative = pos.shares * (quote.price - previous);
       }
     }
 
-    return HoldingValuation(
-      holding: holding,
-      costNative: costNative,
-      costMain: costMain,
+    return finish(
       quoteCurrency: quote.currency,
       lastPrice: quote.price,
       quotedAt: quote.fetchedAt,
@@ -198,6 +557,7 @@ abstract final class PortfolioMath {
     required Map<String, CachedQuote> quotes,
     required String mainCurrency,
     required List<CurrencyRate> rates,
+    List<ShareTransaction> shareTransactions = const [],
   }) {
     final valued = [
       for (final h in holdings)
@@ -206,6 +566,7 @@ abstract final class PortfolioMath {
           quotes: quotes,
           mainCurrency: mainCurrency,
           rates: rates,
+          shareTransactions: shareTransactions,
         ),
     ];
 
@@ -217,9 +578,15 @@ abstract final class PortfolioMath {
     var hasDay = false;
     DateTime? latestQuote;
     String? source;
+    var realized = 0.0;
+    var dividends = 0.0;
+    var invested = 0.0;
 
     for (final v in valued) {
       netWorth += v.valueForNetWorthMain;
+      realized += v.realizedPlMain;
+      dividends += v.dividendMain;
+      invested += v.investedMain;
       if (v.marketMain != null) {
         marketKnown += v.marketMain!;
         hasMarket = true;
@@ -238,6 +605,8 @@ abstract final class PortfolioMath {
     final market = hasMarket ? marketKnown : cost;
     final pl = hasMarket ? market - cost : null;
     final plPct = (pl == null || cost == 0) ? null : (pl / cost) * 100;
+    final totalPl = (pl ?? 0) + realized + dividends;
+    final totalPct = invested == 0 ? null : (totalPl / invested) * 100;
     final totalForAlloc = valued.fold<double>(
       0,
       (s, v) => s + v.valueForNetWorthMain,
@@ -264,6 +633,11 @@ abstract final class PortfolioMath {
       quotedAt: latestQuote,
       quoteSource: source,
       usedCachedQuotes: quotes.isNotEmpty,
+      realizedPlMain: realized,
+      dividendMain: dividends,
+      investedMain: invested,
+      totalPlMain: totalPl,
+      totalPlPercent: totalPct,
     );
   }
 
@@ -274,12 +648,14 @@ abstract final class PortfolioMath {
     required Map<String, CachedQuote> quotes,
     required String mainCurrency,
     required List<CurrencyRate> rates,
+    List<ShareTransaction> shareTransactions = const [],
   }) {
     return summarize(
       holdings: holdings.where((h) => h.includeInNetWorth).toList(),
       quotes: quotes,
       mainCurrency: mainCurrency,
       rates: rates,
+      shareTransactions: shareTransactions,
     ).netWorthMain;
   }
 
@@ -398,13 +774,15 @@ abstract final class PortfolioMath {
   }
 
   /// Portfolio (or single holding) market value in main currency over time.
-  /// Uses current FX rates as a bridge — not historical FX.
+  /// Uses current FX rates as a bridge — not historical FX. Share quantity on
+  /// each day comes from the transaction ledger when present.
   static List<PricePoint> performanceSeries({
     required List<InvestmentHolding> holdings,
     required Map<String, CachedQuote> quotes,
     required String mainCurrency,
     required List<CurrencyRate> rates,
     required QuoteHistoryRange range,
+    List<ShareTransaction> shareTransactions = const [],
   }) {
     if (holdings.isEmpty) return const [];
 
@@ -443,7 +821,12 @@ abstract final class PortfolioMath {
         if (close == null) continue;
         final quote = quoteFor(h, quotes);
         final currency = quote?.currency ?? h.currencyCode;
-        total += toMain(h.shares * close, currency, mainCurrency, rates);
+        final shares = sharesOnDate(
+          holding: h,
+          asOf: day,
+          transactions: shareTransactions,
+        );
+        total += toMain(shares * close, currency, mainCurrency, rates);
         any = true;
       }
       if (any) {

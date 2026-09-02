@@ -132,7 +132,8 @@ void main() {
         child: const MaterialApp(home: AppShell()),
       ),
     );
-    await tester.pumpAndSettle();
+    // First frame — must not be a 0→target tween leftover (live flicker).
+    await tester.pump();
 
     expect(find.text('Available to spend'), findsOneWidget);
     // 3000 − 100 − 50 EUR×1.1 = 2845
@@ -140,6 +141,53 @@ void main() {
 
     final hero = tester.widget<MoneyText>(find.byType(MoneyText).first);
     expect(hero.amount, closeTo(repo.availableToSpend(), 0.01));
+    expect(hero.amount, isNot(closeTo(0, 1)));
+  });
+
+  testWidgets('Home ATS matches Reports cash flow immediately after save',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHousehold();
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FinanceRepository>.value(
+        value: repo,
+        child: const MaterialApp(home: AppShell()),
+      ),
+    );
+    await tester.pump();
+
+    await repo.addTransaction(
+      MoneyTransaction.create(
+        type: TransactionType.expense,
+        amount: 200,
+        currencyCode: 'USD',
+        accountId: repo.checking.id,
+        categoryId: repo.groceries.id,
+        ownerProfileId: repo.you.id,
+        visibility: VisibilityScope.shared,
+        date: DateTime.now(),
+        note: 'Housing stand-in',
+      ),
+    );
+    await tester.pump();
+
+    final homeAts = tester.widget<MoneyText>(find.byType(MoneyText).first);
+    expect(homeAts.amount, closeTo(repo.availableToSpend(), 0.01));
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FinanceRepository>.value(
+        value: repo,
+        child: const MaterialApp(home: ReportsScreen()),
+      ),
+    );
+    await tester.pump();
+
+    final cashFlow = tester
+        .widgetList<MoneyText>(find.byType(MoneyText))
+        .firstWhere((w) => w.emphasize);
+    expect(cashFlow.amount, closeTo(homeAts.amount, 0.01));
+    expect(cashFlow.amount, closeTo(repo.availableToSpend(), 0.01));
   });
 
   testWidgets('hiding private spend raises available to spend', (tester) async {
@@ -193,9 +241,44 @@ void main() {
         child: const MaterialApp(home: ReportsScreen()),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(find.text('Spend by category'), findsOneWidget);
     expect(find.text('Groceries'), findsOneWidget);
+    final cashFlow = tester
+        .widgetList<MoneyText>(find.byType(MoneyText))
+        .firstWhere((w) => w.emphasize);
+    expect(cashFlow.amount, closeTo(repo.availableToSpend(), 0.01));
+  });
+
+  testWidgets('recent activity shows native currency and main equivalent',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHousehold();
+    repo.settings = repo.settings.copyWith(mainCurrency: 'USD');
+
+    tester.view.physicalSize = const Size(800, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FinanceRepository>.value(
+        value: repo,
+        child: const MaterialApp(home: AppShell()),
+      ),
+    );
+    await tester.pump();
+
+    final amounts = tester.widgetList<MoneyText>(find.byType(MoneyText)).toList();
+    expect(amounts.any((w) => w.currencyCode == 'EUR'), isTrue);
+    expect(
+      amounts.any(
+        (w) =>
+            w.currencyCode == 'USD' &&
+            w.signed &&
+            (w.amount + 55).abs() < 0.01,
+      ),
+      isTrue,
+    );
   });
 }

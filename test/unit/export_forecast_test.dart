@@ -58,7 +58,7 @@ void main() {
     expect(summary.plannedExpensesMonthly, greaterThan(3297.99));
   });
 
-  test('end of month is current + one monthly net', () {
+  test('end of month does not add another full month of already-booked salary', () {
     final summary = forecast();
     final current = MoneyMath.netWorthMain(
       accounts: snapshot.accounts,
@@ -67,20 +67,31 @@ void main() {
       rates: snapshot.rates,
       asOf: asOf,
     );
-    expect(summary.endOfMonthBalance, closeTo(current + summary.monthlyNet, 0.01));
+    final ledgeredMonthEnd = MoneyMath.netWorthMain(
+      accounts: snapshot.accounts,
+      transactions: snapshot.transactions,
+      mainCurrency: 'CHF',
+      rates: snapshot.rates,
+      asOf: DateTime(2026, 8, 31),
+    );
+    // Future-dated August rows are in the month-end ledger, not in "today".
+    expect(ledgeredMonthEnd, lessThan(current));
+    // Old bug: EOM = today + a full extra typical month (double-counted August salary).
+    expect(
+      summary.endOfMonthBalance,
+      isNot(closeTo(current + summary.monthlyNet, 1)),
+    );
+    expect(summary.endOfMonthBalance, lessThan(current + summary.monthlyNet));
+    // EOM is ledger at month-end plus leftover envelopes, not another salary.
+    expect(summary.endOfMonthBalance, lessThan(ledgeredMonthEnd + 2000));
   });
 
-  test('calendar year from August is current + monthly net × 5', () {
+  test('calendar year from August is remaining August plus Sep–Dec', () {
     final summary = forecast();
-    final current = MoneyMath.netWorthMain(
-      accounts: snapshot.accounts,
-      transactions: snapshot.transactions,
-      mainCurrency: 'CHF',
-      rates: snapshot.rates,
-      asOf: asOf,
+    expect(
+      summary.endOfYearBalance,
+      closeTo(summary.endOfMonthBalance + summary.monthlyNet * 4, 0.01),
     );
-    // Aug..Dec inclusive
-    expect(summary.endOfYearBalance, closeTo(current + summary.monthlyNet * 5, 0.01));
     expect(summary.endOfYearBalance, lessThan(summary.endOfPeriodBalance));
   });
 

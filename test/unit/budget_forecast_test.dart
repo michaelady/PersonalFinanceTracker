@@ -81,6 +81,10 @@ void main() {
       // Recurring +3000 minus budget plan 900.
       expect(summary.monthlyNet, closeTo(2100, 0.01));
       expect(summary.recurringNetPerPeriod, closeTo(3000, 0.01));
+      // Already booked: opening 1000 + salary 3000 − food 750 = 3250.
+      // Remaining food envelope 150. Must not add another 3000 salary.
+      expect(summary.endOfMonthBalance, closeTo(3100, 0.01));
+      expect(summary.endOfMonthBalance, isNot(closeTo(5350, 1)));
     });
 
     test('end of period follows horizon, not calendar year', () {
@@ -412,6 +416,115 @@ void main() {
       // Opening 1000 + already-booked July salary 500 = current 1500.
       expect(summary.monthlyNet, closeTo(500, 0.01));
       expect(summary.endOfPeriodBalance, closeTo(1500 + 500 * 12, 0.01));
+    });
+
+    test('does not double-count the same salary booked in two months', () {
+      final owner = 'p1';
+      final account = Account.create(
+        name: 'Checking',
+        type: AccountType.checking,
+        currencyCode: 'USD',
+        ownerProfileId: owner,
+        visibility: VisibilityScope.shared,
+        openingBalance: 0,
+      );
+      final salary = SpendCategory.create(
+        name: 'Salary',
+        iconName: 'pay',
+        colorHex: 1,
+        isIncome: true,
+      );
+      final asOf = DateTime(2026, 8, 15);
+      final txs = [
+        MoneyTransaction.create(
+          type: TransactionType.income,
+          amount: 3000,
+          currencyCode: 'USD',
+          accountId: account.id,
+          categoryId: salary.id,
+          ownerProfileId: owner,
+          visibility: VisibilityScope.shared,
+          date: DateTime(2026, 7, 1),
+          isRecurring: true,
+          recurringLabel: 'Salary',
+          recurrencePeriod: RecurrencePeriod.monthly,
+        ),
+        MoneyTransaction.create(
+          type: TransactionType.income,
+          amount: 3000,
+          currencyCode: 'USD',
+          accountId: account.id,
+          categoryId: salary.id,
+          ownerProfileId: owner,
+          visibility: VisibilityScope.shared,
+          date: DateTime(2026, 8, 1),
+          isRecurring: true,
+          recurringLabel: 'Salary',
+          recurrencePeriod: RecurrencePeriod.monthly,
+        ),
+      ];
+
+      final summary = BudgetForecast.project(
+        accounts: [account],
+        transactions: txs,
+        budgets: const [],
+        mainCurrency: 'USD',
+        rates: FxRateService.defaultRatesFor('USD'),
+        horizon: ForecastHorizon.m1,
+        recurrence: RecurrencePeriod.monthly,
+        now: asOf,
+      );
+
+      // One salary series, not 6000/month from July+August rows.
+      expect(summary.recurringIncomeMonthly, closeTo(3000, 0.01));
+      expect(summary.monthlyNet, closeTo(3000, 0.01));
+      expect(summary.recurringNetPerPeriod, closeTo(3000, 0.01));
+    });
+
+    test('end of year in December is remaining this month only', () {
+      final owner = 'p1';
+      final account = Account.create(
+        name: 'Checking',
+        type: AccountType.checking,
+        currencyCode: 'USD',
+        ownerProfileId: owner,
+        visibility: VisibilityScope.shared,
+        openingBalance: 1000,
+      );
+      final salary = SpendCategory.create(
+        name: 'Salary',
+        iconName: 'pay',
+        colorHex: 1,
+        isIncome: true,
+      );
+      final asOf = DateTime(2026, 12, 10);
+      final txs = [
+        MoneyTransaction.create(
+          type: TransactionType.income,
+          amount: 2000,
+          currencyCode: 'USD',
+          accountId: account.id,
+          categoryId: salary.id,
+          ownerProfileId: owner,
+          visibility: VisibilityScope.shared,
+          date: DateTime(2026, 12, 1),
+          isRecurring: true,
+          recurrencePeriod: RecurrencePeriod.monthly,
+        ),
+      ];
+      final summary = BudgetForecast.project(
+        accounts: [account],
+        transactions: txs,
+        budgets: const [],
+        mainCurrency: 'USD',
+        rates: FxRateService.defaultRatesFor('USD'),
+        horizon: ForecastHorizon.y1,
+        recurrence: RecurrencePeriod.monthly,
+        now: asOf,
+      );
+      expect(summary.endOfYearBalance, closeTo(summary.endOfMonthBalance, 0.01));
+      // Salary already booked; no leftover envelopes.
+      expect(summary.endOfMonthBalance, closeTo(3000, 0.01));
     });
   });
 

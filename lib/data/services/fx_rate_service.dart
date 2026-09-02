@@ -28,11 +28,45 @@ class FxRateService {
   /// Returns rates as rateToMain for [mainCurrency]
   /// (1 unit of code = rateToMain units of main).
   Future<FxRefreshResult> fetchRates({required String mainCurrency}) async {
+    FxRefreshResult? primary;
     try {
-      return await _fetchFrankfurter(mainCurrency);
+      primary = await _fetchFrankfurter(mainCurrency);
+      if (_coversSupported(primary.rates)) return primary;
     } catch (_) {
-      return await _fetchOpenErApi(mainCurrency);
+      primary = null;
     }
+
+    try {
+      final secondary = await _fetchOpenErApi(mainCurrency);
+      if (primary == null) return secondary;
+      return _mergePreferPrimary(primary, secondary);
+    } catch (_) {
+      if (primary != null) return primary;
+      rethrow;
+    }
+  }
+
+  static bool _coversSupported(List<CurrencyRate> rates) {
+    final codes = rates.map((r) => r.code).toSet();
+    return SupportedCurrencies.codes.every(codes.contains);
+  }
+
+  static FxRefreshResult _mergePreferPrimary(
+    FxRefreshResult primary,
+    FxRefreshResult secondary,
+  ) {
+    final byCode = {for (final r in secondary.rates) r.code: r};
+    for (final r in primary.rates) {
+      byCode[r.code] = r;
+    }
+    return FxRefreshResult(
+      rates: [
+        for (final code in SupportedCurrencies.codes)
+          if (byCode.containsKey(code)) byCode[code]!,
+      ],
+      source: '${primary.source}+${secondary.source}',
+      fetchedAt: primary.fetchedAt,
+    );
   }
 
   Future<FxRefreshResult> _fetchFrankfurter(String mainCurrency) async {

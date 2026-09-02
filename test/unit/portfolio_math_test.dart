@@ -187,6 +187,93 @@ void main() {
       expect(series[2].close, closeTo(280.5, 0.01));
     });
 
+    test('historyForRange falls back to previous close vs last price', () {
+      final q = quote(
+        symbol: 'SMTC',
+        price: 132.27,
+        previousClose: 130,
+      );
+      expect(
+        PortfolioMath.storedHistoryForRange(q, QuoteHistoryRange.oneMonth),
+        isEmpty,
+      );
+      final series = PortfolioMath.historyForRange(
+        q,
+        QuoteHistoryRange.oneMonth,
+        now: DateTime.utc(2026, 9, 2),
+      );
+      expect(series, hasLength(2));
+      expect(series.first.close, closeTo(130, 0.0001));
+      expect(series.last.close, closeTo(132.27, 0.0001));
+      expect(
+        PortfolioMath.usesLastCloseFallback(q, QuoteHistoryRange.oneMonth),
+        isTrue,
+      );
+    });
+
+    test('performanceSeries uses two-point previous-close fallback', () {
+      final holding = lot(ticker: 'SMTC', shares: 2, cost: 100);
+      final series = PortfolioMath.performanceSeries(
+        holdings: [holding],
+        quotes: {
+          'SMTC': quote(
+            symbol: 'SMTC',
+            price: 132.27,
+            previousClose: 130,
+          ),
+        },
+        mainCurrency: 'USD',
+        rates: rates,
+        range: QuoteHistoryRange.oneMonth,
+      );
+      expect(series, hasLength(2));
+      expect(series.first.close, closeTo(260, 0.01));
+      expect(series.last.close, closeTo(264.54, 0.01));
+      expect(
+        PortfolioMath.chartUsesLastCloseFallback(
+          holdings: [holding],
+          quotes: {
+            'SMTC': quote(
+              symbol: 'SMTC',
+              price: 132.27,
+              previousClose: 130,
+            ),
+          },
+          range: QuoteHistoryRange.oneMonth,
+        ),
+        isTrue,
+      );
+    });
+
+    test('1y daily history is sliced to 1M without a new series', () {
+      final now = DateTime.utc(2026, 9, 2);
+      final q = quote(symbol: 'SMTC', price: 132).copyWith(
+        history: {
+          '1y': [
+            PricePoint(date: DateTime.utc(2026, 1, 2), close: 50),
+            PricePoint(date: DateTime.utc(2026, 8, 10), close: 100),
+            PricePoint(date: DateTime.utc(2026, 8, 20), close: 110),
+            PricePoint(date: DateTime.utc(2026, 9, 2), close: 132),
+          ],
+        },
+      );
+      final month = PortfolioMath.storedHistoryForRange(
+        q,
+        QuoteHistoryRange.oneMonth,
+        now: now,
+      );
+      expect(month, hasLength(3));
+      expect(month.first.close, closeTo(100, 0.0001));
+      expect(
+        PortfolioMath.usesLastCloseFallback(
+          q,
+          QuoteHistoryRange.oneMonth,
+          now: now,
+        ),
+        isFalse,
+      );
+    });
+
     test('holdingsForChart selects the full book or a single lot', () {
       final aapl = lot(ticker: 'AAPL', shares: 2, cost: 100);
       final vwce = lot(ticker: 'VWCE.DE', shares: 1, cost: 50, currency: 'EUR');

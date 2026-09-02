@@ -36,6 +36,9 @@ class FinanceRepository extends ChangeNotifier {
   final _uuid = const Uuid();
   static const _quotePause = Duration(milliseconds: 280);
   YahooQuoteClient? _yahooClient;
+  CompositeQuoteClient? _compositeClient;
+  String? _compositeFinnhubToken;
+  String? _compositeAlphaVantageToken;
 
   bool loading = true;
   String? error;
@@ -61,6 +64,7 @@ class FinanceRepository extends ChangeNotifier {
   List<InvestmentHolding> holdings = [];
   Map<String, CachedQuote> quotes = {};
   String? finnhubToken;
+  String? alphaVantageToken;
 
   bool quotesRefreshing = false;
   String? quotesError;
@@ -81,6 +85,7 @@ class FinanceRepository extends ChangeNotifier {
       _ensureSupportedCurrencies();
       quotes = await _store.loadQuotes();
       finnhubToken = await _store.loadFinnhubToken();
+      alphaVantageToken = await _store.loadAlphaVantageToken();
     } catch (e) {
       error = e.toString();
       _seedEmpty();
@@ -272,10 +277,18 @@ class FinanceRepository extends ChangeNotifier {
     final injected = _injectedQuoteClient;
     if (injected != null) return injected;
     final yahoo = _yahooClient ??= YahooQuoteClient();
-    return CompositeQuoteClient.fromTokens(
-      yahoo: yahoo,
-      userToken: finnhubToken,
-    );
+    if (_compositeClient == null ||
+        _compositeFinnhubToken != finnhubToken ||
+        _compositeAlphaVantageToken != alphaVantageToken) {
+      _compositeClient = CompositeQuoteClient.fromTokens(
+        yahoo: yahoo,
+        userToken: finnhubToken,
+        alphaVantageUserToken: alphaVantageToken,
+      );
+      _compositeFinnhubToken = finnhubToken;
+      _compositeAlphaVantageToken = alphaVantageToken;
+    }
+    return _compositeClient!;
   }
 
   Future<void> _persist() async {
@@ -480,6 +493,7 @@ class FinanceRepository extends ChangeNotifier {
     householdSyncMessage = null;
     quotes = {};
     finnhubToken = null;
+    alphaVantageToken = null;
     quotesError = null;
     quotesSource = null;
     quotesUpdatedAt = null;
@@ -901,6 +915,16 @@ class FinanceRepository extends ChangeNotifier {
     }
   }
 
+  Future<void> setAlphaVantageToken(String? token) async {
+    final trimmed = token?.trim();
+    alphaVantageToken = (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+    await _store.saveAlphaVantageToken(alphaVantageToken);
+    notifyListeners();
+    if (holdings.isNotEmpty) {
+      await refreshQuotes(force: true);
+    }
+  }
+
   Future<List<TickerSearchResult>> searchTickers(String query) async {
     try {
       return await _quoteClient.search(query);
@@ -932,12 +956,9 @@ class FinanceRepository extends ChangeNotifier {
       for (var i = 0; i < tickers.length; i++) {
         final ticker = tickers[i];
         final cached = quotes[ticker];
-        final historyFresh = cached != null &&
-            cached.historyFetchedAt[range.key] != null &&
-            PortfolioMath.quoteIsFresh(cached.historyFetchedAt[range.key]!);
         final quoteFresh =
             cached != null && PortfolioMath.quoteIsFresh(cached.fetchedAt);
-        if (!force && quoteFresh && historyFresh) {
+        if (!force && cached != null && quoteFresh && _historyCacheFresh(cached, range)) {
           lastSource = cached.source;
           continue;
         }
@@ -986,6 +1007,19 @@ class FinanceRepository extends ChangeNotifier {
     final history = {...previous.history, ...next.history};
     final fetched = {...previous.historyFetchedAt, ...next.historyFetchedAt};
     return next.copyWith(history: history, historyFetchedAt: fetched);
+  }
+
+  /// Skip a network fetch when this range (or a longer cached series) is fresh.
+  /// Empty history with a fresh timestamp means we already tried (e.g. Finnhub
+  /// 403 + Alpha Vantage miss) and should not burn the daily quota again.
+  bool _historyCacheFresh(CachedQuote cached, QuoteHistoryRange range) {
+    final stored = PortfolioMath.storedHistoryForRange(cached, range);
+    if (stored.length >= 2) {
+      final at = PortfolioMath.historyFetchedAtForRange(cached, range);
+      return at != null && PortfolioMath.quoteIsFresh(at);
+    }
+    final attempted = cached.historyFetchedAt[range.key];
+    return attempted != null && PortfolioMath.quoteIsFresh(attempted);
   }
 
   CsvFullExportResult exportFullCsv({DateTime? exportedAt}) {

@@ -229,6 +229,140 @@ FinnhubQuoteClient? createFinnhubQuoteClient({
   return FinnhubQuoteClient(token: token, client: client);
 }
 
+/// Compile-time Alpha Vantage key from `--dart-define=ALPHAVANTAGE_API_KEY=...`.
+/// Empty when the define is omitted. Never commit a real key.
+const bakedAlphaVantageApiKey = String.fromEnvironment(
+  'ALPHAVANTAGE_API_KEY',
+  defaultValue: '',
+);
+
+/// User-saved token wins; otherwise the compile-time baked key.
+String? resolveAlphaVantageApiKey({
+  String? userToken,
+  String bakedToken = bakedAlphaVantageApiKey,
+}) {
+  final user = userToken?.trim();
+  if (user != null && user.isNotEmpty) return user;
+  final baked = bakedToken.trim();
+  if (baked.isNotEmpty) return baked;
+  return null;
+}
+
+/// Builds an Alpha Vantage history client only when a non-empty key is available.
+AlphaVantageHistoryClient? createAlphaVantageHistoryClient({
+  String? userToken,
+  String bakedToken = bakedAlphaVantageApiKey,
+  http.Client? client,
+}) {
+  final token = resolveAlphaVantageApiKey(
+    userToken: userToken,
+    bakedToken: bakedToken,
+  );
+  if (token == null) return null;
+  return AlphaVantageHistoryClient(apiKey: token, client: client);
+}
+
+/// CORS-open daily history (TIME_SERIES_DAILY). Used on web after Yahoo fails
+/// and Finnhub candles are unavailable on the free plan. Not used for last price.
+class AlphaVantageHistoryClient {
+  AlphaVantageHistoryClient({
+    required this.apiKey,
+    http.Client? client,
+  }) : _client = client ?? http.Client();
+
+  final String apiKey;
+  final http.Client _client;
+  final Map<String, _CachedDaily> _cache = {};
+  final Map<String, Future<List<PricePoint>>> _inflight = {};
+
+  /// One full daily series per ticker (about 1y). Reused across 1M/3M/1Y.
+  Future<List<PricePoint>> fetchDailyHistory(String symbol) {
+    final ticker = symbol.trim().toUpperCase();
+    final cached = _cache[ticker];
+    if (cached != null && PortfolioMath.quoteIsFresh(cached.at)) {
+      return Future.value(cached.points);
+    }
+    final pending = _inflight[ticker];
+    if (pending != null) return pending;
+    final future = _downloadDailyHistory(ticker);
+    _inflight[ticker] = future;
+    return future.whenComplete(() => _inflight.remove(ticker));
+  }
+
+  Future<List<PricePoint>> _downloadDailyHistory(String ticker) async {
+    final uri = Uri.https('www.alphavantage.co', '/query', {
+      'function': 'TIME_SERIES_DAILY',
+      'symbol': ticker,
+      'outputsize': 'full',
+      'apikey': apiKey,
+    });
+    final res = await _client.get(uri).timeout(const Duration(seconds: 15));
+    if (res.statusCode != 200) {
+      throw StateError('Alpha Vantage HTTP ${res.statusCode} for $ticker');
+    }
+    final json = jsonDecode(res.body) as Map<String, dynamic>;
+    final points = parseDailySeries(
+      json,
+      keep: QuoteHistoryRange.oneYear.lookback,
+    );
+    if (points.length < 2) {
+      throw StateError('Alpha Vantage returned no daily history for $ticker');
+    }
+    _cache[ticker] = _CachedDaily(DateTime.now().toUtc(), points);
+    return points;
+  }
+
+  static List<PricePoint> parseDailySeries(
+    Map<String, dynamic> json, {
+    Duration? keep,
+    DateTime? now,
+  }) {
+    final blocked = json['Note'] ?? json['Information'] ?? json['Error Message'];
+    if (blocked != null) {
+      throw StateError('Alpha Vantage: $blocked');
+    }
+    final series = json['Time Series (Daily)'] as Map<String, dynamic>?;
+    if (series == null || series.isEmpty) return const [];
+    final out = <PricePoint>[];
+    for (final entry in series.entries) {
+      final date = _parseUtcDate(entry.key);
+      final close = _parseClose(entry.value);
+      if (date == null || close == null) continue;
+      out.add(PricePoint(date: date, close: close));
+    }
+    out.sort((a, b) => a.date.compareTo(b.date));
+    if (keep == null) return out;
+    final cut = (now ?? DateTime.now()).toUtc().subtract(keep);
+    return out.where((p) => !p.date.isBefore(cut)).toList();
+  }
+
+  static DateTime? _parseUtcDate(String raw) {
+    final parts = raw.split('-');
+    if (parts.length < 3) return null;
+    final y = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    final d = int.tryParse(parts[2]);
+    if (y == null || m == null || d == null) return null;
+    return DateTime.utc(y, m, d);
+  }
+
+  static double? _parseClose(dynamic raw) {
+    if (raw is Map) {
+      final value = raw['4. close'] ?? raw['4. Close'] ?? raw['close'];
+      return _parseClose(value);
+    }
+    if (raw is num) return raw.toDouble();
+    if (raw is String) return double.tryParse(raw);
+    return null;
+  }
+}
+
+class _CachedDaily {
+  const _CachedDaily(this.at, this.points);
+  final DateTime at;
+  final List<PricePoint> points;
+}
+
 /// Finnhub quote + candle. Token is user-provided (local only) or a
 /// compile-time `--dart-define=FINNHUB_API_KEY` baked into a release build.
 class FinnhubQuoteClient implements QuoteClient {
@@ -239,6 +373,10 @@ class FinnhubQuoteClient implements QuoteClient {
 
   final String token;
   final http.Client _client;
+  bool _candlesUnavailableOnPlan = false;
+
+  /// Free Finnhub tokens can quote but not candles (HTTP 403).
+  bool get candlesUnavailableOnPlan => _candlesUnavailableOnPlan;
 
   @override
   Future<QuoteBundle> fetchChart(
@@ -274,6 +412,7 @@ class FinnhubQuoteClient implements QuoteClient {
     String ticker,
     QuoteHistoryRange range,
   ) async {
+    if (_candlesUnavailableOnPlan) return const [];
     final to = DateTime.now().toUtc();
     final from = to.subtract(range.lookback);
     final uri = Uri.https('finnhub.io', '/api/v1/stock/candle', {
@@ -285,12 +424,23 @@ class FinnhubQuoteClient implements QuoteClient {
     });
     try {
       final res = await _client.get(uri).timeout(const Duration(seconds: 10));
+      if (isCandleAccessDenied(res.statusCode, res.body)) {
+        // Quotes work on the free plan; candles do not. Not an offline failure.
+        _candlesUnavailableOnPlan = true;
+        return const [];
+      }
       if (res.statusCode != 200) return const [];
       final json = jsonDecode(res.body) as Map<String, dynamic>;
       return parseCandle(json);
     } catch (_) {
       return const [];
     }
+  }
+
+  static bool isCandleAccessDenied(int statusCode, [String? body]) {
+    if (statusCode == 401 || statusCode == 403) return true;
+    final text = body ?? '';
+    return text.contains("You don't have access to this resource");
   }
 
   @override
@@ -381,19 +531,24 @@ class FinnhubQuoteClient implements QuoteClient {
   }
 }
 
-/// Try Yahoo first (native Android/Windows). On failure, Finnhub if a token
-/// is available (user-saved, or compile-time baked key). Never uses a CORS proxy.
+/// Try Yahoo first (native Android/Windows). On failure, Finnhub quote (and
+/// candles when the plan allows). If candles are missing, Alpha Vantage daily
+/// history is the CORS-open web fallback. Never uses a CORS proxy.
 class CompositeQuoteClient implements QuoteClient {
   CompositeQuoteClient({
     required this.yahoo,
     this.finnhub,
+    this.alphaVantage,
   });
 
-  /// Yahoo plus optional Finnhub. User-saved token overrides [bakedToken].
+  /// Yahoo plus optional Finnhub / Alpha Vantage. User-saved tokens override
+  /// compile-time baked keys.
   factory CompositeQuoteClient.fromTokens({
     required QuoteClient yahoo,
     String? userToken,
     String bakedToken = bakedFinnhubApiKey,
+    String? alphaVantageUserToken,
+    String alphaVantageBakedToken = bakedAlphaVantageApiKey,
     http.Client? httpClient,
   }) {
     return CompositeQuoteClient(
@@ -403,11 +558,17 @@ class CompositeQuoteClient implements QuoteClient {
         bakedToken: bakedToken,
         client: httpClient,
       ),
+      alphaVantage: createAlphaVantageHistoryClient(
+        userToken: alphaVantageUserToken,
+        bakedToken: alphaVantageBakedToken,
+        client: httpClient,
+      ),
     );
   }
 
   final QuoteClient yahoo;
   final QuoteClient? finnhub;
+  final AlphaVantageHistoryClient? alphaVantage;
 
   @override
   Future<QuoteBundle> fetchChart(
@@ -419,13 +580,56 @@ class CompositeQuoteClient implements QuoteClient {
     } catch (yahooError) {
       final fallback = finnhub;
       if (fallback == null) rethrow;
+      final QuoteBundle bundle;
       try {
-        return await fallback.fetchChart(symbol, range: range);
+        bundle = await fallback.fetchChart(symbol, range: range);
       } catch (finnhubError) {
         throw StateError(
           'Yahoo failed ($yahooError); Finnhub failed ($finnhubError)',
         );
       }
+      return _attachDailyHistory(bundle, symbol, range);
+    }
+  }
+
+  /// Finnhub last price is kept. Empty / 403 candles get Alpha Vantage daily
+  /// closes when a key is available (one 1y series, sliced for 1M/3M).
+  Future<QuoteBundle> _attachDailyHistory(
+    QuoteBundle bundle,
+    String symbol,
+    QuoteHistoryRange range,
+  ) async {
+    if (bundle.history.length >= 2) return bundle;
+    final av = alphaVantage;
+    if (av == null) return bundle;
+    try {
+      final year = await av.fetchDailyHistory(symbol);
+      final at = DateTime.now().toUtc();
+      var quote = bundle.quote.copyWith(
+        history: {
+          ...bundle.quote.history,
+          QuoteHistoryRange.oneYear.key: year,
+        },
+        historyFetchedAt: {
+          ...bundle.quote.historyFetchedAt,
+          QuoteHistoryRange.oneYear.key: at,
+        },
+      );
+      final sliced = PortfolioMath.storedHistoryForRange(quote, range);
+      if (sliced.length < 2) return bundle;
+      quote = quote.copyWith(
+        history: {
+          ...quote.history,
+          range.key: sliced,
+        },
+        historyFetchedAt: {
+          ...quote.historyFetchedAt,
+          range.key: at,
+        },
+      );
+      return QuoteBundle(quote: quote, history: sliced, range: range);
+    } catch (_) {
+      return bundle;
     }
   }
 

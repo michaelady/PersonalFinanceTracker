@@ -154,6 +154,19 @@ class SettingsScreen extends StatelessWidget {
                 trailing: const Icon(Icons.edit_outlined),
                 onTap: () => _editFinnhubToken(context, repo),
               ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.show_chart_outlined),
+                title: const Text('Alpha Vantage API key (optional)'),
+                subtitle: Text(
+                  repo.alphaVantageToken != null &&
+                          repo.alphaVantageToken!.isNotEmpty
+                      ? 'Saved on this device only — used for web price history'
+                      : 'The website may already have a default key for daily history when Finnhub candles are blocked.',
+                ),
+                trailing: const Icon(Icons.edit_outlined),
+                onTap: () => _editAlphaVantageToken(context, repo),
+              ),
               const SizedBox(height: 16),
               Text('Data', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
@@ -216,7 +229,7 @@ class SettingsScreen extends StatelessWidget {
               const SizedBox(height: 24),
               Text(
                 'Offline-first · share household by invite link · '
-                'quotes from Yahoo Finance (Finnhub fallback on web)',
+                'quotes from Yahoo Finance (Finnhub + Alpha Vantage on web)',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ],
@@ -389,6 +402,64 @@ class SettingsScreen extends StatelessWidget {
     );
     if (ok == true) {
       await repo.setFinnhubToken(controller.text);
+    }
+    controller.dispose();
+  }
+
+  Future<void> _editAlphaVantageToken(
+    BuildContext context,
+    FinanceRepository repo,
+  ) async {
+    final controller =
+        TextEditingController(text: repo.alphaVantageToken ?? '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Alpha Vantage API key'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Optional. Stored only on this device — never synced or exported. '
+              'Used for daily price history on the website when Yahoo is blocked '
+              'and Finnhub candles are not on the free plan. Get a free key at '
+              'alphavantage.co. Leave blank to use the website default (if any).',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(
+                labelText: 'API key',
+                hintText: 'Paste key',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              controller.clear();
+              Navigator.pop(context, true);
+            },
+            child: const Text('Clear'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await repo.setAlphaVantageToken(controller.text);
     }
     controller.dispose();
   }

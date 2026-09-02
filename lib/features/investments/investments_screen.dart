@@ -15,6 +15,17 @@ import '../../widgets/money_text.dart';
 import '../../widgets/responsive.dart';
 import '../../widgets/visibility_chip.dart';
 
+String performanceEmptyCopy({required bool hasLastPrice}) {
+  if (hasLastPrice) {
+    return 'No daily history for this range. Last price is still shown above.';
+  }
+  return 'No history yet for this range. Pull to refresh when online.';
+}
+
+String performanceTwoPointCaption(QuoteHistoryRange range) {
+  return 'Last close vs last price — not a full ${range.chartLabel} history.';
+}
+
 class InvestmentsScreen extends StatefulWidget {
   const InvestmentsScreen({super.key});
 
@@ -372,6 +383,15 @@ class _ChartBlock extends StatelessWidget {
       rates: repo.rates,
       range: range,
     );
+    final twoPointFallback = PortfolioMath.chartUsesLastCloseFallback(
+      holdings: selected,
+      quotes: repo.quotes,
+      range: range,
+    );
+    final hasLastPrice = selected.any((h) {
+      final quote = repo.quotes[h.ticker.toUpperCase()];
+      return quote != null && quote.price > 0;
+    });
     final subtitle = selectedHolding == null
         ? 'Whole portfolio market value'
         : selectedHolding.displayName.isEmpty
@@ -441,22 +461,33 @@ class _ChartBlock extends StatelessWidget {
               color: Colors.white.withValues(alpha: 0.45),
             ),
             child: Text(
-              'No history yet for this range. Pull to refresh when online.',
+              performanceEmptyCopy(hasLastPrice: hasLastPrice),
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           )
         else
-          _PerformanceChart(series: series, currency: currency),
+          _PerformanceChart(
+            series: series,
+            currency: currency,
+            fallbackCaption: twoPointFallback
+                ? performanceTwoPointCaption(range)
+                : null,
+          ),
       ],
     );
   }
 }
 
 class _PerformanceChart extends StatelessWidget {
-  const _PerformanceChart({required this.series, required this.currency});
+  const _PerformanceChart({
+    required this.series,
+    required this.currency,
+    this.fallbackCaption,
+  });
 
   final List<PricePoint> series;
   final String currency;
+  final String? fallbackCaption;
 
   @override
   Widget build(BuildContext context) {
@@ -589,7 +620,8 @@ class _PerformanceChart extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Touch the line for value and date.',
+          fallbackCaption ?? 'Touch the line for value and date.',
+          key: fallbackCaption == null ? null : const Key('chart-fallback-caption'),
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: ZenthoColors.inkMuted,
               ),
@@ -784,6 +816,7 @@ String? _sourceLabel(String? source) {
   return switch (source) {
     'yahoo' => 'Yahoo Finance',
     'finnhub' => 'Finnhub',
+    'alphavantage' => 'Alpha Vantage',
     null => null,
     _ => source,
   };

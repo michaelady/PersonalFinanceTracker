@@ -2,13 +2,14 @@ import '../models/models.dart';
 import 'money_math.dart';
 
 enum QuoteHistoryRange {
-  oneMonth('1mo', Duration(days: 32)),
-  threeMonths('3mo', Duration(days: 96)),
-  oneYear('1y', Duration(days: 370));
+  oneMonth('1mo', Duration(days: 32), '1M'),
+  threeMonths('3mo', Duration(days: 96), '3M'),
+  oneYear('1y', Duration(days: 370), '1Y');
 
-  const QuoteHistoryRange(this.key, this.lookback);
+  const QuoteHistoryRange(this.key, this.lookback, this.chartLabel);
   final String key;
   final Duration lookback;
+  final String chartLabel;
 }
 
 class HoldingValuation {
@@ -282,29 +283,105 @@ abstract final class PortfolioMath {
     ).netWorthMain;
   }
 
-  static List<PricePoint> historyForRange(
+  /// Daily closes stored on the quote, including a longer series sliced down.
+  /// Does not invent a previous-close → last-price pair.
+  static List<PricePoint> storedHistoryForRange(
     CachedQuote? quote,
-    QuoteHistoryRange range,
-  ) {
+    QuoteHistoryRange range, {
+    DateTime? now,
+  }) {
     if (quote == null) return const [];
     final points = quote.history[range.key];
-    if (points != null && points.isNotEmpty) return points;
+    if (points != null && points.length >= 2) return points;
+    final asOf = now ?? DateTime.now().toUtc();
     // A longer series can fill a shorter window.
     if (range != QuoteHistoryRange.oneYear) {
       final longer = quote.history[QuoteHistoryRange.oneYear.key];
       if (longer != null && longer.isNotEmpty) {
-        final cut = DateTime.now().toUtc().subtract(range.lookback);
-        return longer.where((p) => !p.date.isBefore(cut)).toList();
+        final cut = asOf.subtract(range.lookback);
+        final sliced = longer.where((p) => !p.date.isBefore(cut)).toList();
+        if (sliced.length >= 2) return sliced;
       }
     }
     if (range == QuoteHistoryRange.oneMonth) {
       final q3 = quote.history[QuoteHistoryRange.threeMonths.key];
       if (q3 != null && q3.isNotEmpty) {
-        final cut = DateTime.now().toUtc().subtract(range.lookback);
-        return q3.where((p) => !p.date.isBefore(cut)).toList();
+        final cut = asOf.subtract(range.lookback);
+        final sliced = q3.where((p) => !p.date.isBefore(cut)).toList();
+        if (sliced.length >= 2) return sliced;
       }
     }
+    if (points != null && points.isNotEmpty) return points;
     return const [];
+  }
+
+  /// When daily history is missing, plot last session close vs last price.
+  static List<PricePoint> twoPointFromQuote(
+    CachedQuote quote, {
+    DateTime? now,
+  }) {
+    final prev = quote.previousClose;
+    if (prev == null || prev <= 0 || quote.price <= 0) return const [];
+    final end = (now ?? quote.fetchedAt).toUtc();
+    return [
+      PricePoint(date: end.subtract(const Duration(days: 1)), close: prev),
+      PricePoint(date: end, close: quote.price),
+    ];
+  }
+
+  static bool usesLastCloseFallback(
+    CachedQuote? quote,
+    QuoteHistoryRange range, {
+    DateTime? now,
+  }) {
+    if (quote == null) return false;
+    return storedHistoryForRange(quote, range, now: now).length < 2 &&
+        twoPointFromQuote(quote, now: now).length >= 2;
+  }
+
+  /// True when every quoted holding in [holdings] is using the two-point
+  /// previous-close fallback rather than a daily series.
+  static bool chartUsesLastCloseFallback({
+    required List<InvestmentHolding> holdings,
+    required Map<String, CachedQuote> quotes,
+    required QuoteHistoryRange range,
+    DateTime? now,
+  }) {
+    var any = false;
+    for (final h in holdings) {
+      final quote = quoteFor(h, quotes);
+      if (quote == null) continue;
+      any = true;
+      if (!usesLastCloseFallback(quote, range, now: now)) return false;
+    }
+    return any;
+  }
+
+  static DateTime? historyFetchedAtForRange(
+    CachedQuote quote,
+    QuoteHistoryRange range,
+  ) {
+    final direct = quote.historyFetchedAt[range.key];
+    if (direct != null) return direct;
+    final year = quote.historyFetchedAt[QuoteHistoryRange.oneYear.key];
+    if (year != null && range != QuoteHistoryRange.oneYear) return year;
+    if (range == QuoteHistoryRange.oneMonth) {
+      return quote.historyFetchedAt[QuoteHistoryRange.threeMonths.key];
+    }
+    return null;
+  }
+
+  static List<PricePoint> historyForRange(
+    CachedQuote? quote,
+    QuoteHistoryRange range, {
+    DateTime? now,
+  }) {
+    final stored = storedHistoryForRange(quote, range, now: now);
+    if (stored.length >= 2) return stored;
+    if (quote == null) return stored;
+    final fallback = twoPointFromQuote(quote, now: now);
+    if (fallback.length >= 2) return fallback;
+    return stored;
   }
 
   /// Lots that feed the performance chart. `null` [selectedHoldingId] is the

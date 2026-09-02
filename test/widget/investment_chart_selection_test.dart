@@ -33,7 +33,11 @@ class MemoryStoreRepo extends FinanceRepository {
   late InvestmentHolding apple;
   late InvestmentHolding microsoft;
 
-  Future<void> seedHoldings({bool withHistory = true}) async {
+  Future<void> seedHoldings({
+    bool withHistory = true,
+    bool withQuotes = true,
+    double? previousClose,
+  }) async {
     you = HouseholdProfile.create('You');
     profiles = [you];
     settings = AppSettings(
@@ -61,6 +65,12 @@ class MemoryStoreRepo extends FinanceRepository {
       visibility: VisibilityScope.shared,
     );
     holdings = [apple, microsoft];
+    if (!withQuotes) {
+      quotes = {};
+      loading = false;
+      notifyListeners();
+      return;
+    }
     final now = DateTime.now().toUtc();
     quotes = {
       'AAPL': CachedQuote(
@@ -69,6 +79,7 @@ class MemoryStoreRepo extends FinanceRepository {
         currency: 'USD',
         fetchedAt: now,
         source: 'test',
+        previousClose: previousClose,
         history: withHistory
             ? {
                 '1mo': [
@@ -86,6 +97,7 @@ class MemoryStoreRepo extends FinanceRepository {
         currency: 'USD',
         fetchedAt: now,
         source: 'test',
+        previousClose: previousClose,
         history: withHistory
             ? {
                 '1mo': [
@@ -265,8 +277,60 @@ void main() {
     expect(find.byKey(const Key('performance-empty')), findsOneWidget);
     expect(find.byKey(const Key('performance-chart')), findsNothing);
     expect(
-      find.text('No history yet for this range. Pull to refresh when online.'),
+      find.text(performanceEmptyCopy(hasLastPrice: true)),
       findsOneWidget,
+    );
+    expect(
+      find.text('No history yet for this range. Pull to refresh when online.'),
+      findsNothing,
+    );
+  });
+
+  testWidgets('empty history without a quote still mentions refresh when online',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHoldings(withHistory: false, withQuotes: false);
+    await pumpInvestments(tester, repo);
+
+    expect(find.byKey(const Key('performance-empty')), findsOneWidget);
+    expect(
+      find.text(performanceEmptyCopy(hasLastPrice: false)),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('previous close vs last price plots instead of a blank chart',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHoldings(withHistory: false, previousClose: 100);
+    await pumpInvestments(tester, repo);
+
+    expect(find.byKey(const Key('performance-chart')), findsOneWidget);
+    expect(find.byKey(const Key('performance-empty')), findsNothing);
+    expect(
+      find.byKey(const Key('chart-fallback-caption')),
+      findsOneWidget,
+    );
+    expect(
+      find.text(performanceTwoPointCaption(QuoteHistoryRange.oneMonth)),
+      findsOneWidget,
+    );
+    expect(latestChartValue(tester), closeTo(320, 0.01));
+  });
+
+  test('performance empty copy does not say offline when a last price exists',
+      () {
+    expect(
+      performanceEmptyCopy(hasLastPrice: true),
+      'No daily history for this range. Last price is still shown above.',
+    );
+    expect(
+      performanceEmptyCopy(hasLastPrice: true).contains('Pull to refresh'),
+      isFalse,
+    );
+    expect(
+      performanceEmptyCopy(hasLastPrice: false),
+      contains('Pull to refresh when online'),
     );
   });
 }

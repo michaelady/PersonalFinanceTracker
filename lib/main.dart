@@ -5,9 +5,11 @@ import 'package:provider/provider.dart';
 import 'app.dart';
 import 'data/auth/auth_service.dart';
 import 'data/auth/firebase_auth_service.dart';
+import 'data/persistence/firestore_household_cloud_store.dart';
 import 'data/persistence/firestore_user_cloud_store.dart';
 import 'data/persistence/user_cloud_store.dart';
 import 'data/repositories/finance_repository.dart';
+import 'data/services/household_cloud_store.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
@@ -15,6 +17,7 @@ Future<void> main() async {
 
   AuthService auth = const SignedOutAuthService();
   UserCloudStore userCloud = const NoOpUserCloudStore();
+  HouseholdCloudStore? householdCloud;
   if (DefaultFirebaseOptions.isConfigured) {
     try {
       await Firebase.initializeApp(
@@ -22,12 +25,17 @@ Future<void> main() async {
       );
       auth = FirebaseAuthService();
       userCloud = FirestoreUserCloudStore();
+      householdCloud = FirestoreHouseholdCloudStore();
     } catch (e, st) {
       debugPrint('Firebase failed to initialize: $e\n$st');
     }
   }
 
-  final repo = FinanceRepository(auth: auth, userCloud: userCloud);
+  final repo = FinanceRepository(
+    auth: auth,
+    userCloud: userCloud,
+    householdCloud: householdCloud,
+  );
   await repo.init();
   runApp(
     ChangeNotifierProvider.value(

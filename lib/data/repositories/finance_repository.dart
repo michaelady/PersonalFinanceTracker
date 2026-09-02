@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
@@ -12,6 +13,7 @@ import '../../domain/services/portfolio_math.dart';
 import '../../domain/services/recurrence_period.dart';
 import '../../domain/services/supported_currencies.dart';
 import '../auth/auth_service.dart';
+import '../persistence/firestore_household_cloud_store.dart';
 import '../persistence/local_store.dart';
 import '../persistence/user_cloud_store.dart';
 import '../services/fx_rate_service.dart';
@@ -29,13 +31,24 @@ class FinanceRepository extends ChangeNotifier {
     this.refreshRatesOnInit = true,
   })  : _store = store ?? LocalStore(),
         _fx = fxService ?? FxRateService(),
-        _householdCloud = householdCloud ?? JsonBlobHouseholdCloudStore(),
+        _householdCloud = householdCloud ?? _defaultHouseholdCloud(),
         _injectedQuoteClient = quoteClient,
         _auth = auth ?? const SignedOutAuthService(),
         _userCloud = userCloud ?? const NoOpUserCloudStore() {
     _authSub = _auth.authStateChanges().listen((_) {
       notifyListeners();
     });
+  }
+
+  static HouseholdCloudStore _defaultHouseholdCloud() {
+    try {
+      if (Firebase.apps.isNotEmpty) {
+        return FirestoreHouseholdCloudStore();
+      }
+    } catch (_) {
+      // Unit tests and hosts without a Firebase plugin.
+    }
+    return const UnavailableHouseholdCloudStore();
   }
 
   final LocalStore _store;

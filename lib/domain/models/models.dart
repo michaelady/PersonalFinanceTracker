@@ -891,7 +891,7 @@ class AppSettings extends Equatable {
   final bool showPrivate;
   final bool showShared;
 
-  /// Remote household document id (jsonblob) when sharing is enabled.
+  /// Remote household document id (Firestore `households/{id}`) when sharing.
   final String? householdCloudId;
 
   /// Secret required to join / write the shared household.

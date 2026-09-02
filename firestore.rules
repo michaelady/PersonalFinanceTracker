@@ -6,5 +6,16 @@ service cloud.firestore {
     match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
+
+    // Household invite docs. Unsigned-in users share via unguessable
+    // document ids + inviteKey (`?hh=<id>&k=<inviteKey>`).
+    match /households/{householdId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasAll(['inviteKey', 'snapshot', 'updatedAt'])
+                    && request.resource.data.inviteKey is string
+                    && request.resource.data.inviteKey.size() >= 8;
+      allow update: if request.resource.data.inviteKey == resource.data.inviteKey;
+      allow delete: if true;
+    }
   }
 }

@@ -686,9 +686,10 @@ void main() {
   });
 
   test('Alpha Vantage spaces history fetches for different tickers', () async {
+    final clock = _FakeClock(DateTime.utc(2026, 9, 2, 12));
     final startedAt = <DateTime>[];
     final client = MockClient((request) async {
-      startedAt.add(DateTime.now());
+      startedAt.add(clock.now());
       final symbol = request.url.queryParameters['symbol']!;
       return http.Response(
         jsonEncode(_alphaVantageDaily({
@@ -702,6 +703,8 @@ void main() {
       apiKey: 'test-av-key',
       client: client,
       minRequestGap: const Duration(milliseconds: 40),
+      clock: clock.now,
+      delay: clock.delay,
     );
     await av.fetchDailyHistory('AAPL');
     await av.fetchDailyHistory('MSFT');
@@ -1020,9 +1023,10 @@ void main() {
   });
 
   test('Twelve Data spaces history fetches for different tickers', () async {
+    final clock = _FakeClock(DateTime.utc(2026, 9, 2, 12));
     final startedAt = <DateTime>[];
     final client = MockClient((request) async {
-      startedAt.add(DateTime.now());
+      startedAt.add(clock.now());
       final symbol = request.url.queryParameters['symbol']!;
       return http.Response(
         jsonEncode(_twelveDataDaily(symbol, {
@@ -1036,6 +1040,8 @@ void main() {
       apiKey: 'test-td-key',
       client: client,
       minRequestGap: const Duration(milliseconds: 40),
+      clock: clock.now,
+      delay: clock.delay,
     );
     await td.fetchDailyHistory('AAPL');
     await td.fetchDailyHistory('MSFT');
@@ -1045,6 +1051,42 @@ void main() {
       isTrue,
     );
   });
+
+  test('Twelve Data cache key trims ticker whitespace', () async {
+    var hits = 0;
+    final client = MockClient((request) async {
+      hits++;
+      final symbol = request.url.queryParameters['symbol']!;
+      expect(symbol, 'AAPL');
+      return http.Response(
+        jsonEncode(_twelveDataDaily(symbol, {
+          '2026-09-01': '10.00',
+          '2026-09-02': '11.00',
+        })),
+        200,
+      );
+    });
+    final td = TwelveDataHistoryClient(
+      apiKey: 'test-td-key',
+      client: client,
+      minRequestGap: Duration.zero,
+    );
+    await td.fetchDailyHistory(' aapl ');
+    await td.fetchDailyHistory('AAPL');
+    expect(hits, 1);
+  });
+}
+
+class _FakeClock {
+  _FakeClock(this._now);
+
+  DateTime _now;
+
+  DateTime now() => _now;
+
+  Future<void> delay(Duration duration) async {
+    _now = _now.add(duration);
+  }
 }
 
 String _ymd(DateTime d) {

@@ -1,4 +1,4 @@
-/// Signed-in Google / Firebase user. Household jsonblob invites are not identity.
+/// Signed-in Google / Firebase user. Household invite links are not identity.
 class AuthUser {
   const AuthUser({
     required this.uid,

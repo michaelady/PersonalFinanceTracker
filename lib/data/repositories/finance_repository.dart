@@ -11,7 +11,9 @@ import '../../domain/services/money_math.dart';
 import '../../domain/services/portfolio_math.dart';
 import '../../domain/services/recurrence_period.dart';
 import '../../domain/services/supported_currencies.dart';
+import '../auth/auth_service.dart';
 import '../persistence/local_store.dart';
+import '../persistence/user_cloud_store.dart';
 import '../services/fx_rate_service.dart';
 import '../services/household_cloud_store.dart';
 import '../services/quote_client.dart';
@@ -22,16 +24,26 @@ class FinanceRepository extends ChangeNotifier {
     FxRateService? fxService,
     HouseholdCloudStore? householdCloud,
     QuoteClient? quoteClient,
+    AuthService? auth,
+    UserCloudStore? userCloud,
     this.refreshRatesOnInit = true,
   })  : _store = store ?? LocalStore(),
         _fx = fxService ?? FxRateService(),
         _householdCloud = householdCloud ?? JsonBlobHouseholdCloudStore(),
-        _injectedQuoteClient = quoteClient;
+        _injectedQuoteClient = quoteClient,
+        _auth = auth ?? const SignedOutAuthService(),
+        _userCloud = userCloud ?? const NoOpUserCloudStore() {
+    _authSub = _auth.authStateChanges().listen((_) {
+      notifyListeners();
+    });
+  }
 
   final LocalStore _store;
   final FxRateService _fx;
   final HouseholdCloudStore _householdCloud;
   final QuoteClient? _injectedQuoteClient;
+  final AuthService _auth;
+  final UserCloudStore _userCloud;
   final bool refreshRatesOnInit;
   final _uuid = const Uuid();
   static const _quotePause = Duration(milliseconds: 280);
@@ -53,6 +65,14 @@ class FinanceRepository extends ChangeNotifier {
   String? householdSyncMessage;
   Timer? _householdPushTimer;
   bool _applyingRemote = false;
+  bool _applyingUserCloud = false;
+  StreamSubscription<AuthUser?>? _authSub;
+
+  bool accountSyncing = false;
+  String? accountSyncError;
+  String? accountSyncMessage;
+  DateTime? snapshotUpdatedAt;
+  DateTime? lastCloudSyncedAt;
 
   late AppSettings settings;
   List<HouseholdProfile> profiles = [];
@@ -89,6 +109,10 @@ class FinanceRepository extends ChangeNotifier {
       finnhubToken = await _store.loadFinnhubToken();
       alphaVantageToken = await _store.loadAlphaVantageToken();
       twelveDataToken = await _store.loadTwelveDataToken();
+      snapshotUpdatedAt = await _store.loadUpdatedAt();
+      if (_auth.currentUser != null) {
+        await _reconcileUserCloud();
+      }
     } catch (e) {
       error = e.toString();
       _seedEmpty();
@@ -276,6 +300,114 @@ class FinanceRepository extends ChangeNotifier {
         holdings: holdings,
       );
 
+  AuthUser? get signedInUser => _auth.currentUser;
+
+  bool get cloudAccountsAvailable => _auth.isAvailable;
+
+  bool get _hasUploadableLocal =>
+      settings.onboardingComplete ||
+      accounts.isNotEmpty ||
+      transactions.isNotEmpty ||
+      budgets.isNotEmpty ||
+      goals.isNotEmpty ||
+      holdings.isNotEmpty;
+
+  Future<void> _persist() async {
+    await _writeLocalSnapshot();
+    notifyListeners();
+    if (!_applyingRemote && settings.householdSharingEnabled) {
+      _scheduleHouseholdPush();
+    }
+  }
+
+  Future<void> _writeLocalSnapshot() async {
+    snapshotUpdatedAt = DateTime.now().toUtc();
+    await _store.save(snapshot, updatedAt: snapshotUpdatedAt);
+    if (!_applyingUserCloud) {
+      await _pushUserCloudIfSignedIn();
+    }
+  }
+
+  Future<void> _pushUserCloudIfSignedIn() async {
+    final user = _auth.currentUser;
+    if (user == null || _applyingUserCloud) return;
+    if (!_hasUploadableLocal) return;
+    try {
+      final updatedAt = snapshotUpdatedAt ?? DateTime.now().toUtc();
+      snapshotUpdatedAt = updatedAt;
+      await _userCloud.save(user.uid, snapshot, updatedAt: updatedAt);
+      lastCloudSyncedAt = updatedAt;
+      accountSyncError = null;
+    } catch (e) {
+      accountSyncError = 'Could not save online: $e';
+    }
+  }
+
+  Future<void> _reconcileUserCloud() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    accountSyncing = true;
+    accountSyncError = null;
+    notifyListeners();
+    try {
+      final remote = await _userCloud.load(user.uid);
+      if (remote == null) {
+        if (_hasUploadableLocal) {
+          await _pushUserCloudIfSignedIn();
+          accountSyncMessage = 'Uploaded this device to your account';
+        }
+        return;
+      }
+
+      final localUpdated = snapshotUpdatedAt;
+      final cloudIsNewer = localUpdated == null ||
+          remote.updatedAt.isAfter(localUpdated);
+      final shouldApplyCloud = !_hasUploadableLocal || cloudIsNewer;
+
+      if (shouldApplyCloud) {
+        _applyingUserCloud = true;
+        _hydrate(remote.snapshot);
+        _ensureSupportedCurrencies();
+        snapshotUpdatedAt = remote.updatedAt.toUtc();
+        await _store.save(snapshot, updatedAt: snapshotUpdatedAt);
+        lastCloudSyncedAt = snapshotUpdatedAt;
+        _applyingUserCloud = false;
+        accountSyncMessage = 'Loaded from your account';
+      } else {
+        await _pushUserCloudIfSignedIn();
+        accountSyncMessage = 'Uploaded this device to your account';
+      }
+    } catch (e) {
+      accountSyncError = 'Could not sync online: $e';
+    } finally {
+      accountSyncing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> signInWithGoogle() async {
+    accountSyncError = null;
+    accountSyncing = true;
+    notifyListeners();
+    try {
+      await _auth.signInWithGoogle();
+    } catch (e) {
+      accountSyncError = 'Google sign-in failed: $e';
+      accountSyncing = false;
+      notifyListeners();
+      rethrow;
+    }
+    await _reconcileUserCloud();
+  }
+
+  Future<void> signOut() async {
+    await _auth.signOut();
+    lastCloudSyncedAt = null;
+    accountSyncMessage = null;
+    accountSyncError = null;
+    notifyListeners();
+  }
+
   QuoteClient get _quoteClient {
     final injected = _injectedQuoteClient;
     if (injected != null) return injected;
@@ -295,14 +427,6 @@ class FinanceRepository extends ChangeNotifier {
       _compositeTwelveDataToken = twelveDataToken;
     }
     return _compositeClient!;
-  }
-
-  Future<void> _persist() async {
-    await _store.save(snapshot);
-    notifyListeners();
-    if (!_applyingRemote && settings.householdSharingEnabled) {
-      _scheduleHouseholdPush();
-    }
   }
 
   void _scheduleHouseholdPush() {
@@ -504,7 +628,11 @@ class FinanceRepository extends ChangeNotifier {
     quotesError = null;
     quotesSource = null;
     quotesUpdatedAt = null;
-    await _store.save(snapshot);
+    snapshotUpdatedAt = DateTime.now().toUtc();
+    lastCloudSyncedAt = null;
+    accountSyncMessage = null;
+    accountSyncError = null;
+    await _store.save(snapshot, updatedAt: snapshotUpdatedAt);
     notifyListeners();
   }
 
@@ -564,9 +692,8 @@ class FinanceRepository extends ChangeNotifier {
         householdInviteKey: inviteKey,
         householdUpdatedAt: updatedAt,
       );
-      // Persist local ids without immediately re-pushing.
       _applyingRemote = true;
-      await _store.save(snapshot);
+      await _writeLocalSnapshot();
       _applyingRemote = false;
       householdSyncMessage = 'Household sharing on';
       notifyListeners();
@@ -600,7 +727,7 @@ class FinanceRepository extends ChangeNotifier {
     householdSyncMessage = 'Household sharing off';
     householdSyncError = null;
     _applyingRemote = true;
-    await _store.save(snapshot);
+    await _writeLocalSnapshot();
     _applyingRemote = false;
     notifyListeners();
   }
@@ -652,7 +779,7 @@ class FinanceRepository extends ChangeNotifier {
         ),
       );
       _ensureSupportedCurrencies();
-      await _store.save(snapshot);
+      await _writeLocalSnapshot();
       _applyingRemote = false;
 
       // Publish the new member so the host sees them.
@@ -720,7 +847,7 @@ class FinanceRepository extends ChangeNotifier {
               ),
             );
             _ensureSupportedCurrencies();
-            await _store.save(snapshot);
+            await _writeLocalSnapshot();
             _applyingRemote = false;
             householdSyncMessage = 'Household updated from link';
           }
@@ -751,7 +878,7 @@ class FinanceRepository extends ChangeNotifier {
           householdSyncMessage =
               'Share link refreshed — copy the new link from User';
           _applyingRemote = true;
-          await _store.save(snapshot);
+          await _writeLocalSnapshot();
           _applyingRemote = false;
           householdSyncing = false;
           notifyListeners();
@@ -759,7 +886,7 @@ class FinanceRepository extends ChangeNotifier {
         }
         settings = settings.copyWith(householdUpdatedAt: updatedAt);
         _applyingRemote = true;
-        await _store.save(snapshot);
+        await _writeLocalSnapshot();
         _applyingRemote = false;
         householdSyncMessage = 'Household synced';
       }
@@ -1172,6 +1299,7 @@ class FinanceRepository extends ChangeNotifier {
   @override
   void dispose() {
     _householdPushTimer?.cancel();
+    _authSub?.cancel();
     super.dispose();
   }
 }

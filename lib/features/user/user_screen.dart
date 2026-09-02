@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-import '../../branding/zentho_logo.dart';
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
 import '../../domain/services/household_invite.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/responsive.dart';
+import 'account_cloud_section.dart';
 
 class UserScreen extends StatelessWidget {
   const UserScreen({super.key});
@@ -33,6 +33,8 @@ class UserScreen extends StatelessWidget {
                 style: theme.textTheme.bodyMedium,
               ),
               const SizedBox(height: 20),
+              const AccountCloudSection(),
+              const SizedBox(height: 28),
               if (me != null) ...[
                 ListTile(
                   contentPadding: EdgeInsets.zero,

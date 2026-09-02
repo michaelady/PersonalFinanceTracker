@@ -14,6 +14,7 @@ import '../../widgets/responsive.dart';
 import '../accounts/accounts_screen.dart';
 import '../bills/bill_scan_flow.dart';
 import '../reports/reports_screen.dart';
+import '../user/account_cloud_section.dart';
 import '../user/user_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -32,6 +33,8 @@ class SettingsScreen extends StatelessWidget {
           child: ListView(
             children: [
               const ZenthoWordmark(showTagline: true, compact: true),
+              const SizedBox(height: 24),
+              const AccountCloudSection(),
               const SizedBox(height: 24),
               Text('Household', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
@@ -241,7 +244,8 @@ class SettingsScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               Text(
-                'Offline-first · share household by invite link · '
+                'Offline-first · Google account syncs this device · '
+                'share household by invite link · '
                 'quotes from Yahoo Finance (Finnhub + Alpha Vantage + Twelve Data on web)',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),

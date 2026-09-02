@@ -1,9 +1,19 @@
+import 'dart:math' as math;
+
 import '../models/models.dart';
+import 'supported_currencies.dart';
 
 /// Pure finance calculations — unit-tested, no Flutter dependencies.
 abstract final class MoneyMath {
   static String monthKey(DateTime date) =>
       '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}';
+
+  /// Rounds [amount] to the ISO minor unit of [currencyCode] (JPY: 0 dp, else 2).
+  static double roundToMinorUnits(double amount, String currencyCode) {
+    final digits = SupportedCurrencies.fractionDigits(currencyCode);
+    final factor = math.pow(10, digits).toDouble();
+    return (amount * factor).roundToDouble() / factor;
+  }
 
   static double rateFor(
     String currencyCode,
@@ -27,8 +37,9 @@ abstract final class MoneyMath {
     required List<CurrencyRate> rates,
     double? overrideRate,
   }) {
-    return amount *
+    final raw = amount *
         rateFor(currencyCode, mainCurrency, rates, overrideRate: overrideRate);
+    return roundToMinorUnits(raw, mainCurrency);
   }
 
   static bool isVisible({
@@ -90,14 +101,17 @@ abstract final class MoneyMath {
 
       final amountInAccountCurrency = tx.currencyCode == account.currencyCode
           ? tx.amount
-          : toMain(
-                amount: tx.amount,
-                currencyCode: tx.currencyCode,
-                mainCurrency: mainCurrency,
-                rates: rates,
-                overrideRate: tx.exchangeRateToMain,
-              ) /
-              rateFor(account.currencyCode, mainCurrency, rates);
+          : roundToMinorUnits(
+              toMain(
+                    amount: tx.amount,
+                    currencyCode: tx.currencyCode,
+                    mainCurrency: mainCurrency,
+                    rates: rates,
+                    overrideRate: tx.exchangeRateToMain,
+                  ) /
+                  rateFor(account.currencyCode, mainCurrency, rates),
+              account.currencyCode,
+            );
 
       switch (tx.type) {
         case TransactionType.income:
@@ -291,6 +305,20 @@ abstract final class MoneyMath {
     ].join('|');
   }
 
+  /// Latest booking per recurring series (most recent date first).
+  static List<MoneyTransaction> latestRecurringTemplates(
+    Iterable<MoneyTransaction> transactions,
+  ) {
+    final recurring = transactions.where((tx) => tx.isRecurring).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+    final seen = <String>{};
+    final templates = <MoneyTransaction>[];
+    for (final tx in recurring) {
+      if (seen.add(recurringSeriesKey(tx))) templates.add(tx);
+    }
+    return templates;
+  }
+
   /// Monthly-equivalent amount for recurring items of [type] that have no
   /// booking in [monthKeyValue] yet (e.g. salary last booked in July).
   static double _expectedRecurringNotYetBooked({
@@ -300,23 +328,16 @@ abstract final class MoneyMath {
     required String mainCurrency,
     required List<CurrencyRate> rates,
   }) {
-    final recurring = transactions
-        .where((tx) => tx.isRecurring && tx.type == type)
-        .toList()
-      ..sort((a, b) => b.date.compareTo(a.date));
-
     final bookedKeys = <String>{
       for (final tx in transactions)
         if (tx.type == type && monthKey(tx.date) == monthKeyValue)
           recurringSeriesKey(tx),
     };
 
-    final seen = <String>{};
     var extra = 0.0;
-    for (final tx in recurring) {
-      final key = recurringSeriesKey(tx);
-      if (!seen.add(key)) continue; // latest template only
-      if (bookedKeys.contains(key)) continue;
+    for (final tx in latestRecurringTemplates(transactions)) {
+      if (tx.type != type) continue;
+      if (bookedKeys.contains(recurringSeriesKey(tx))) continue;
       final main = toMain(
         amount: tx.amount,
         currencyCode: tx.currencyCode,

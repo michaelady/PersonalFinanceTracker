@@ -299,13 +299,18 @@ class FinanceRepository extends ChangeNotifier {
     await refreshRatesOnline();
   }
 
-  Future<void> loadDemoExtras(String ownerId) async {
+  Future<void> loadDemoExtras(String ownerId, {DateTime? now}) async {
     final checking = accounts.first;
     final groceries = categories.firstWhere((c) => c.name == 'Groceries');
     final salary = categories.firstWhere((c) => c.name == 'Salary');
     final subs = categories.firstWhere((c) => c.name == 'Subscriptions');
-    final now = DateTime.now();
-    final mk = MoneyMath.monthKey(now);
+    final asOf = now ?? DateTime.now();
+    final mk = MoneyMath.monthKey(asOf);
+
+    DateTime onOrBeforeToday(int day) {
+      final clamped = day > asOf.day ? asOf.day : day;
+      return DateTime(asOf.year, asOf.month, clamped);
+    }
 
     transactions = [
       MoneyTransaction.create(
@@ -314,10 +319,13 @@ class FinanceRepository extends ChangeNotifier {
         currencyCode: settings.mainCurrency,
         accountId: checking.id,
         categoryId: salary.id,
-        date: DateTime(now.year, now.month, 1),
+        date: onOrBeforeToday(1),
         ownerProfileId: ownerId,
         visibility: VisibilityScope.shared,
         note: 'Monthly salary',
+        isRecurring: true,
+        recurringLabel: 'Monthly salary',
+        recurrencePeriod: RecurrencePeriod.monthly,
       ),
       MoneyTransaction.create(
         type: TransactionType.expense,
@@ -325,7 +333,7 @@ class FinanceRepository extends ChangeNotifier {
         currencyCode: settings.mainCurrency,
         accountId: checking.id,
         categoryId: groceries.id,
-        date: DateTime(now.year, now.month, 3),
+        date: onOrBeforeToday(3),
         ownerProfileId: ownerId,
         visibility: VisibilityScope.shared,
         note: 'Market run',
@@ -336,7 +344,7 @@ class FinanceRepository extends ChangeNotifier {
         currencyCode: settings.mainCurrency,
         accountId: checking.id,
         categoryId: subs.id,
-        date: DateTime(now.year, now.month, 5),
+        date: onOrBeforeToday(5),
         ownerProfileId: ownerId,
         visibility: VisibilityScope.private,
         note: 'Streaming',

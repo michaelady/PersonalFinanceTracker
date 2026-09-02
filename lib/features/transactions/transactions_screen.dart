@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
+import '../../domain/services/money_math.dart';
 import '../../domain/services/recurrence_period.dart';
 import '../../domain/services/supported_currencies.dart';
 import '../../theme/zentho_colors.dart';
@@ -126,6 +127,18 @@ class TransactionsScreen extends StatelessWidget {
                       final signed = tx.type == TransactionType.expense
                           ? -tx.amount
                           : tx.amount;
+                      final inMain = MoneyMath.toMain(
+                        amount: tx.amount,
+                        currencyCode: tx.currencyCode,
+                        mainCurrency: repo.settings.mainCurrency,
+                        rates: repo.rates,
+                        overrideRate: tx.exchangeRateToMain,
+                      );
+                      final signedMain = tx.type == TransactionType.expense
+                          ? -inMain
+                          : inMain;
+                      final foreign =
+                          tx.currencyCode != repo.settings.mainCurrency;
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
                         title: Text(category?.name ?? 'Transfer'),
@@ -147,7 +160,15 @@ class TransactionsScreen extends StatelessWidget {
                               currencyCode: tx.currencyCode,
                               signed: true,
                             ),
-                            const SizedBox(height: 4),
+                            if (foreign)
+                              MoneyText(
+                                signedMain,
+                                currencyCode: repo.settings.mainCurrency,
+                                signed: true,
+                                style: Theme.of(context).textTheme.bodySmall,
+                              )
+                            else
+                              const SizedBox(height: 4),
                             VisibilityChip(tx.visibility),
                           ],
                         ),

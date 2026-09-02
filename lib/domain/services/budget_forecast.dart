@@ -63,8 +63,13 @@ class BudgetForecastSummary {
 ///               − extra budget room − typical unbudgeted one-offs
 ///   endBalance  = current net worth + periodDelta
 ///
+/// End of *this calendar month* is different: it starts from the ledger as of
+/// the last day of the month (so already-booked and future-dated rows count
+/// once) then adds unbooked recurring items and leftover budget envelopes.
+/// End of calendar year is that month-end figure plus full months after it.
+///
 /// Occurrences use each item’s cadence (weekly ≈ 52/year, monthly × N,
-/// yearly × N/12, …). When every item is monthly, this equals
+/// yearly × N/12, …). When every item is monthly, period end equals
 /// current + monthlyNet × N.
 abstract final class BudgetForecast {
   static BudgetForecastSummary project({
@@ -97,20 +102,31 @@ abstract final class BudgetForecast {
     );
 
     final monthlyNet = plan.netOverMonths(1);
-    final daysInMonth = DateTime(asOf.year, asOf.month + 1, 0).day;
+    final lastDayOfMonth = DateTime(asOf.year, asOf.month + 1, 0);
+    final daysInMonth = lastDayOfMonth.day;
 
-    final recurringTxs = transactions.where((t) => t.isRecurring).toList();
-    final recurringNetPerPeriod = recurringTxs.fold<double>(0, (sum, tx) {
+    final templates = MoneyMath.latestRecurringTemplates(transactions);
+    final recurringNetPerPeriod = templates.fold<double>(0, (sum, tx) {
+      if (tx.type == TransactionType.transfer) return sum;
       final signed = _signedMain(tx, mainCurrency, rates);
       return sum +
           normalizeToPeriod(signed, tx.recurrencePeriod, recurrence, asOf);
     });
 
-    // Inclusive months left in the calendar year (Aug → Aug..Dec = 5).
-    final monthsToYearEnd = 12 - asOf.month + 1;
-
-    final endOfMonthBalance = current + plan.netOverMonths(1);
-    final endOfYearBalance = current + plan.netOverMonths(monthsToYearEnd);
+    // Ledger at month-end already includes future-dated rows this month.
+    // Then add unbooked recurring + leftover budget envelopes — not another
+    // full typical month, which would double-count salary already posted.
+    final ledgeredMonthEnd = MoneyMath.netWorthMain(
+      accounts: accounts,
+      transactions: transactions,
+      mainCurrency: mainCurrency,
+      rates: rates,
+      asOf: lastDayOfMonth,
+    );
+    final endOfMonthBalance = ledgeredMonthEnd + plan.remainingThisMonthNet;
+    // Rest of this month + full months after it (Aug 15 → remaining Aug + Sep..Dec).
+    final endOfYearBalance =
+        endOfMonthBalance + plan.netOverMonths(12 - asOf.month);
     final endOfPeriodBalance = current + plan.netOverMonths(horizon.months);
 
     final series = <ForecastPoint>[
@@ -217,12 +233,17 @@ class _CashflowPlan {
     required this.recurringExpenses,
     required this.extraBudgetMonthly,
     required this.unbudgetedOneOffMonthly,
+    required this.remainingThisMonthNet,
   });
 
   final List<_RecurringAmount> recurringIncomes;
   final List<_RecurringAmount> recurringExpenses;
   final double extraBudgetMonthly;
   final double unbudgetedOneOffMonthly;
+
+  /// Recurring not yet in this calendar month, minus leftover budget room.
+  /// Does not include another copy of items already booked this month.
+  final double remainingThisMonthNet;
 
   double incomeOverMonths(num months) {
     var total = 0.0;
@@ -263,11 +284,13 @@ class _CashflowPlan {
           overrideRate: tx.exchangeRateToMain,
         );
 
+    final templates = MoneyMath.latestRecurringTemplates(transactions);
     final incomes = <_RecurringAmount>[];
     final expenses = <_RecurringAmount>[];
     final recurringMonthlyByCategory = <String, double>{};
 
-    for (final tx in transactions.where((t) => t.isRecurring)) {
+    for (final tx in templates) {
+      if (tx.type == TransactionType.transfer) continue;
       final amount = toMainAmount(tx);
       final item = _RecurringAmount(amount: amount, period: tx.recurrencePeriod);
       if (tx.type == TransactionType.income) {
@@ -287,14 +310,76 @@ class _CashflowPlan {
       }
     }
 
+    final bookedSeriesThisMonth = <String>{
+      for (final tx in transactions)
+        if (MoneyMath.monthKey(tx.date) == monthKey)
+          MoneyMath.recurringSeriesKey(tx),
+    };
+
     // Budgets are monthly envelopes. Only add the room not already covered by
     // recurring bills in that category (avoids rent + housing budget twice).
     var extraBudgetMonthly = 0.0;
+    var extraBudgetRemaining = 0.0;
     for (final budget in monthBudgets) {
       final covered = recurringMonthlyByCategory[budget.categoryId] ?? 0;
       final extra = budget.allocated - covered;
-      if (extra > 0) extraBudgetMonthly += extra;
+      if (extra <= 0) continue;
+      extraBudgetMonthly += extra;
+
+      final bookedInCat = MoneyMath.spentInCategoryMain(
+        categoryId: budget.categoryId,
+        monthKeyValue: monthKey,
+        transactions: transactions,
+        mainCurrency: mainCurrency,
+        rates: rates,
+      );
+      var recurringBooked = 0.0;
+      for (final tx in templates) {
+        if (tx.type != TransactionType.expense) continue;
+        if (tx.categoryId != budget.categoryId) continue;
+        if (!bookedSeriesThisMonth.contains(MoneyMath.recurringSeriesKey(tx))) {
+          continue;
+        }
+        recurringBooked += BudgetForecast.amountOverMonths(
+          toMainAmount(tx),
+          tx.recurrencePeriod,
+          1,
+        );
+      }
+      final extraSpent =
+          bookedInCat - recurringBooked < 0 ? 0.0 : bookedInCat - recurringBooked;
+      final leftover = extra - extraSpent;
+      if (leftover > 0) extraBudgetRemaining += leftover;
     }
+
+    final expectedIncome = MoneyMath.incomeInMonthMain(
+          transactions: transactions,
+          monthKeyValue: monthKey,
+          mainCurrency: mainCurrency,
+          rates: rates,
+          includeExpectedRecurring: true,
+        ) -
+        MoneyMath.incomeInMonthMain(
+          transactions: transactions,
+          monthKeyValue: monthKey,
+          mainCurrency: mainCurrency,
+          rates: rates,
+        );
+    final expectedExpense = MoneyMath.expenseInMonthMain(
+          transactions: transactions,
+          monthKeyValue: monthKey,
+          mainCurrency: mainCurrency,
+          rates: rates,
+          includeExpectedRecurring: true,
+        ) -
+        MoneyMath.expenseInMonthMain(
+          transactions: transactions,
+          monthKeyValue: monthKey,
+          mainCurrency: mainCurrency,
+          rates: rates,
+        );
+    final remainingThisMonthNet =
+        expectedIncome - expectedExpense - extraBudgetRemaining;
 
     final nrByMonth = <String, double>{};
     for (final tx in transactions) {
@@ -314,6 +399,7 @@ class _CashflowPlan {
       recurringExpenses: expenses,
       extraBudgetMonthly: extraBudgetMonthly,
       unbudgetedOneOffMonthly: unbudgetedNrAvg,
+      remainingThisMonthNet: remainingThisMonthNet,
     );
   }
 }

@@ -109,12 +109,14 @@ class ReportsScreen extends StatelessWidget {
                       monthKeyValue: month,
                       mainCurrency: currency,
                       rates: repo.rates,
+                      includeExpectedRecurring: true,
                     ) -
                     MoneyMath.expenseInMonthMain(
                       transactions: repo.visibleTransactions,
                       monthKeyValue: month,
                       mainCurrency: currency,
                       rates: repo.rates,
+                      includeExpectedRecurring: true,
                     ),
                 currencyCode: currency,
                 signed: true,

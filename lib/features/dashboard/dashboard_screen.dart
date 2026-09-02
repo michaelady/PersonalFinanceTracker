@@ -47,15 +47,10 @@ class DashboardScreen extends StatelessWidget {
                 ),
           ),
           const SizedBox(height: 6),
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: available),
-            duration: const Duration(milliseconds: 650),
-            curve: Curves.easeOutCubic,
-            builder: (context, value, _) => MoneyText(
-              value,
-              currencyCode: currency,
-              emphasize: true,
-            ),
+          MoneyText(
+            available,
+            currencyCode: currency,
+            emphasize: true,
           ),
           const SizedBox(height: 8),
           Text(
@@ -230,8 +225,18 @@ class _TxRow extends StatelessWidget {
     final category = repo.categories
         .where((c) => c.id == tx.categoryId)
         .firstOrNull;
-    final signed =
+    final inMain = MoneyMath.toMain(
+      amount: tx.amount,
+      currencyCode: tx.currencyCode,
+      mainCurrency: repo.settings.mainCurrency,
+      rates: repo.rates,
+      overrideRate: tx.exchangeRateToMain,
+    );
+    final signedNative =
         tx.type == TransactionType.expense ? -tx.amount : tx.amount;
+    final signedMain =
+        tx.type == TransactionType.expense ? -inMain : inMain;
+    final foreign = tx.currencyCode != repo.settings.mainCurrency;
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: () => TransactionsScreen.showEditor(context, repo, existing: tx),
@@ -274,7 +279,25 @@ class _TxRow extends StatelessWidget {
                 ],
               ),
             ),
-            MoneyText(signed, currencyCode: tx.currencyCode, signed: true),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                MoneyText(
+                  signedNative,
+                  currencyCode: tx.currencyCode,
+                  signed: true,
+                ),
+                if (foreign) ...[
+                  const SizedBox(height: 2),
+                  MoneyText(
+                    signedMain,
+                    currencyCode: repo.settings.mainCurrency,
+                    signed: true,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ],
+            ),
           ],
         ),
       ),

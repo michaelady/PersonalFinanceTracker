@@ -32,7 +32,8 @@ void main() {
         mainCurrency: main,
         rates: rates,
       );
-      expect(inMain, closeTo(80.38704875325642, 0.0001));
+      // 86.4 EUR × 0.9304… = 80.387… → rounded to CHF cents.
+      expect(inMain, closeTo(80.39, 0.001));
     });
 
     test('account native balance converts mixed CHF/EUR activity correctly', () {

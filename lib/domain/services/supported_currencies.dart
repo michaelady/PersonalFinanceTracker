@@ -23,4 +23,8 @@ abstract final class SupportedCurrencies {
     'CHF': 1.237569,
     'RON': 0.219213,
   };
+
+  /// ISO-4217 minor units. JPY has no cents; the others in [codes] use 2.
+  static int fractionDigits(String currencyCode) =>
+      currencyCode == 'JPY' ? 0 : 2;
 }

@@ -1006,12 +1006,21 @@ class FinanceRepository extends ChangeNotifier {
     if (previous == null) return next;
     final history = {...previous.history, ...next.history};
     final fetched = {...previous.historyFetchedAt, ...next.historyFetchedAt};
+    final range = bundle.range;
+    // A per-minute Alpha Vantage miss omits this range's stamp so retries are
+    // not blocked for the whole quote TTL. Do not resurrect a previous stamp.
+    if (range != null &&
+        !next.historyFetchedAt.containsKey(range.key) &&
+        (next.history[range.key]?.length ?? 0) < 2) {
+      fetched.remove(range.key);
+    }
     return next.copyWith(history: history, historyFetchedAt: fetched);
   }
 
   /// Skip a network fetch when this range (or a longer cached series) is fresh.
   /// Empty history with a fresh timestamp means we already tried (e.g. Finnhub
-  /// 403 + Alpha Vantage miss) and should not burn the daily quota again.
+  /// 403 + Alpha Vantage daily-quota miss) and should not burn the 25/day limit.
+  /// Per-minute Alpha Vantage throttles are not stamped, so they can retry.
   bool _historyCacheFresh(CachedQuote cached, QuoteHistoryRange range) {
     final stored = PortfolioMath.storedHistoryForRange(cached, range);
     if (stored.length >= 2) {

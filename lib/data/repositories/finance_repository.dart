@@ -272,12 +272,9 @@ class FinanceRepository extends ChangeNotifier {
     final injected = _injectedQuoteClient;
     if (injected != null) return injected;
     final yahoo = _yahooClient ??= YahooQuoteClient();
-    final token = finnhubToken?.trim();
-    return CompositeQuoteClient(
+    return CompositeQuoteClient.fromTokens(
       yahoo: yahoo,
-      finnhub: (token == null || token.isEmpty)
-          ? null
-          : FinnhubQuoteClient(token: token),
+      userToken: finnhubToken,
     );
   }
 
@@ -973,7 +970,7 @@ class FinanceRepository extends ChangeNotifier {
         quotesError =
             'Could not refresh quotes — showing last saved prices.';
       } else if (failures.isNotEmpty) {
-        quotesError = finnhubToken == null || finnhubToken!.isEmpty
+        quotesError = resolveFinnhubToken(userToken: finnhubToken) == null
             ? 'Quotes unavailable. On the website, add a free Finnhub token in Settings.'
             : 'Could not refresh quotes.';
       }

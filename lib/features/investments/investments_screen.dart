@@ -165,9 +165,9 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             'Android and Windows fetch Yahoo directly. This website cannot, '
-            'because Yahoo does not allow browser requests — paste a free '
-            'Finnhub token in Settings (finnhub.io) for live web quotes. '
-            'Last successful prices stay on this device for offline use.',
+            'because Yahoo does not allow browser requests — it may already '
+            'have a default Finnhub key, and a personal key in Settings still '
+            'overrides it. Last successful prices stay on this device for offline use.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
         ],

@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -67,6 +69,40 @@ class InvestmentsScreen extends StatefulWidget {
         ),
       ),
     );
+  }
+
+  static Future<void> importYahooLots(
+    BuildContext context,
+    FinanceRepository repo,
+  ) async {
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['csv'],
+        withData: true,
+      );
+      if (result == null) return;
+      final bytes = result.files.single.bytes;
+      if (bytes == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not read CSV bytes')),
+          );
+        }
+        return;
+      }
+      final csvBody = utf8.decode(bytes, allowMalformed: true);
+      final imported = await repo.importYahooLots(csvBody);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(imported.summary)),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Import failed: $e')),
+      );
+    }
   }
 
   @override
@@ -164,6 +200,12 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
                 FilledButton.tonal(
                   onPressed: () => InvestmentsScreen.showEditor(context, repo),
                   child: const Text('New holding'),
+                ),
+                FilledButton.tonal(
+                  key: const Key('import-yahoo-lots'),
+                  onPressed: () =>
+                      InvestmentsScreen.importYahooLots(context, repo),
+                  child: const Text('Import Yahoo CSV'),
                 ),
               ],
             ),
@@ -272,10 +314,10 @@ class _EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Add a ticker and record share transactions (buy, sell, dividend, '
-            'fee, split). Quotes come from Yahoo Finance — unofficial, delayed, '
-            'and not investment advice. Quantity, cost basis, and P/L are '
-            'derived from the transaction list.',
+            'Add a ticker, record share transactions, or import a Yahoo '
+            'Finance lots CSV. Quantity, cost basis, and P/L are derived from '
+            'the transaction list. Quotes come from Yahoo Finance — unofficial, '
+            'delayed, and not investment advice.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 10),

@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zentho/data/repositories/finance_repository.dart';
 import 'package:zentho/data/services/quote_client.dart';
 import 'package:zentho/domain/models/models.dart';
-import 'package:zentho/domain/services/portfolio_math.dart';
 import 'package:zentho/features/investments/investments_screen.dart';
 
 class _NoNetworkQuoteClient implements QuoteClient {
@@ -53,6 +52,13 @@ class MemoryStoreRepo extends FinanceRepository {
     loading = false;
     notifyListeners();
   }
+
+  @override
+  Future<void> refreshQuotes({
+    Iterable<String>? symbols,
+    QuoteHistoryRange range = QuoteHistoryRange.oneMonth,
+    bool force = false,
+  }) async {}
 }
 
 void main() {
@@ -140,5 +146,39 @@ void main() {
     expect(find.text('Edit transaction'), findsOneWidget);
     expect(find.text('Save changes'), findsOneWidget);
     expect(find.text('Delete'), findsOneWidget);
+  });
+
+  testWidgets('Invest screen has a Yahoo CSV import action', (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedEmptyPortfolio();
+    await pumpInvestments(tester, repo);
+
+    expect(find.byKey(const Key('import-yahoo-lots')), findsOneWidget);
+    expect(find.text('Import Yahoo CSV'), findsOneWidget);
+  });
+
+  testWidgets('sample Yahoo CSV import produces holdings', (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedEmptyPortfolio();
+    const sample = '''
+Symbol,Current Price,Date,Time,Change,Open,High,Low,Volume,Trade Date,Purchase Price,Quantity,Commission,High Limit,Low Limit,Comment,Transaction Type
+RKLB,63.1,2026/09/02,16:00 EDT,0.56,62.29,63.52,61.45,1,20250303,20.33,25.0,3.03,,,,BUY
+VAN.F,174.54,2026/09/02,16:41 CEST,-0.96,173.6,176.04,171.96,231,20251020,102.0,5.0,4.0,,,,BUY
+''';
+    final result = await repo.importYahooLots(
+      sample,
+      refreshQuotesAfter: false,
+    );
+    expect(result.imported, 2);
+    expect(result.createdHoldings, 2);
+    await pumpInvestments(tester, repo);
+
+    expect(find.text('No holdings yet'), findsNothing);
+    expect(find.textContaining('RKLB'), findsWidgets);
+    expect(find.textContaining('VAN.F'), findsWidgets);
+    expect(
+      repo.holdings.singleWhere((h) => h.ticker == 'RKLB').shares,
+      closeTo(25, 0.0001),
+    );
   });
 }

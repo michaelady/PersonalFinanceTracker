@@ -218,8 +218,8 @@ class SettingsScreen extends StatelessWidget {
                 leading: const Icon(Icons.upload_file_outlined),
                 title: const Text('Import CSV'),
                 subtitle: const Text(
-                  'Full Zentho export (replaces all) or bank CSV '
-                  '(date,amount,type,category,account,…)',
+                  'Full Zentho export (replaces all), bank CSV, or Yahoo '
+                  'Finance lots (Invest tab also has this import)',
                 ),
                 onTap: () => _importCsv(context, repo),
               ),
@@ -635,6 +635,10 @@ class SettingsScreen extends StatelessWidget {
                       '${warningCount == 1 ? '' : 's'})',
             ),
           ),
+        );
+      } else if (importResult.yahooLots != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(importResult.yahooLots!.summary)),
         );
       } else {
         final tx = importResult.transactions!;

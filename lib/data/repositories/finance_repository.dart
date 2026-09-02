@@ -12,6 +12,7 @@ import '../../domain/services/money_math.dart';
 import '../../domain/services/portfolio_math.dart';
 import '../../domain/services/recurrence_period.dart';
 import '../../domain/services/supported_currencies.dart';
+import '../../domain/services/yahoo_lots_csv.dart';
 import '../auth/auth_service.dart';
 import '../persistence/firestore_household_cloud_store.dart';
 import '../persistence/local_store.dart';
@@ -1392,11 +1393,23 @@ class FinanceRepository extends ChangeNotifier {
     return result;
   }
 
-  /// Auto-detects full multi-section export vs bank-style transaction CSV.
-  Future<CsvImportOutcome> importCsv(String csvBody) async {
+  /// Auto-detects full multi-section export, Yahoo Finance lots, or
+  /// bank-style transaction CSV.
+  Future<CsvImportOutcome> importCsv(
+    String csvBody, {
+    bool refreshQuotesAfter = true,
+  }) async {
     if (CsvDataExchange.looksLikeFullExport(csvBody)) {
       final full = await importFullCsv(csvBody);
       return CsvImportOutcome.full(full);
+    }
+
+    if (YahooLotsCsv.looksLike(csvBody)) {
+      final lots = await importYahooLots(
+        csvBody,
+        refreshQuotesAfter: refreshQuotesAfter,
+      );
+      return CsvImportOutcome.yahooLots(lots);
     }
 
     final result = CsvImportService.parse(
@@ -1412,6 +1425,135 @@ class FinanceRepository extends ChangeNotifier {
       await _persist();
     }
     return CsvImportOutcome.transactions(result);
+  }
+
+  /// Merges Yahoo Finance lots CSV into the share ledger. Duplicates
+  /// (same symbol + trade date + type + qty + price + commission) are skipped.
+  Future<YahooLotsImportResult> importYahooLots(
+    String csvBody, {
+    bool refreshQuotesAfter = true,
+  }) async {
+    final parsed = YahooLotsCsv.parse(csvBody);
+    if (parsed.lots.isEmpty) {
+      return YahooLotsImportResult(
+        imported: 0,
+        skippedDuplicates: 0,
+        skippedRows: parsed.skippedRows,
+        createdHoldings: 0,
+        errors: parsed.errors,
+      );
+    }
+
+    final fingerprints = <String>{};
+    for (final t in shareTransactions) {
+      fingerprints.add(t.id);
+      final holding = holdingById(t.holdingId);
+      if (holding == null) continue;
+      fingerprints.add(
+        YahooLotsCsv.fingerprint(
+          symbol: holding.ticker,
+          date: t.date,
+          type: t.type,
+          shares: t.shares,
+          price: t.pricePerShare,
+          fee: t.fee,
+        ),
+      );
+    }
+
+    var nextHoldings = [...holdings];
+    var nextTxs = [...shareTransactions];
+    var createdHoldings = 0;
+    var skippedDuplicates = 0;
+    var skippedInvalid = 0;
+    final errors = [...parsed.errors];
+    final imported = <ShareTransaction>[];
+
+    InvestmentHolding? existingHolding(String symbol) {
+      for (final h in nextHoldings) {
+        if (h.ticker.toUpperCase() == symbol) return h;
+      }
+      return null;
+    }
+
+    for (final lot in parsed.lots) {
+      if (fingerprints.contains(lot.fingerprint) ||
+          fingerprints.contains(lot.id)) {
+        skippedDuplicates++;
+        continue;
+      }
+      var created = false;
+      var holding = existingHolding(lot.symbol);
+      if (holding == null) {
+        holding = InvestmentHolding.create(
+          ticker: lot.symbol,
+          displayName: lot.symbol,
+          shares: 0,
+          averageCostPerShare: 0,
+          currencyCode: YahooLotsCsv.currencyForSymbol(
+            lot.symbol,
+            settings.mainCurrency,
+          ),
+          ownerProfileId: settings.activeProfileId,
+          visibility: VisibilityScope.shared,
+        );
+        created = true;
+      }
+      final tx = ShareTransaction(
+        id: lot.id,
+        holdingId: holding.id,
+        type: lot.type,
+        date: lot.date,
+        shares: lot.shares,
+        pricePerShare: lot.pricePerShare,
+        fee: lot.fee,
+        notes: lot.comment,
+      );
+      final candidate = [tx, ...nextTxs];
+      final error = PortfolioMath.validateShareLedger(
+        holding: holding,
+        transactions: candidate,
+      );
+      if (error != null) {
+        skippedInvalid++;
+        errors.add('Row ${lot.sourceRow} (${lot.symbol}): $error');
+        continue;
+      }
+      if (created) {
+        nextHoldings = [...nextHoldings, holding];
+        createdHoldings++;
+        _ensureRateFor(holding.currencyCode);
+      }
+      nextTxs = candidate;
+      imported.add(tx);
+      fingerprints
+        ..add(lot.fingerprint)
+        ..add(lot.id);
+    }
+
+    holdings = nextHoldings;
+    shareTransactions = nextTxs..sort((a, b) => b.date.compareTo(a.date));
+    _syncHoldingsFromLedger();
+    if (imported.isNotEmpty) {
+      await _persist();
+      if (refreshQuotesAfter) {
+        unawaited(
+          refreshQuotes(
+            symbols:
+                {for (final t in imported) holdingById(t.holdingId)?.ticker}
+                    .whereType<String>(),
+          ),
+        );
+      }
+    }
+
+    return YahooLotsImportResult(
+      imported: imported.length,
+      skippedDuplicates: skippedDuplicates,
+      skippedRows: parsed.skippedRows + skippedInvalid,
+      createdHoldings: createdHoldings,
+      errors: errors,
+    );
   }
 
   List<Account> get visibleAccounts => MoneyMath.filterVisible(

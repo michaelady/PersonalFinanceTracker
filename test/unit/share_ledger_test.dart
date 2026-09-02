@@ -449,7 +449,6 @@ void main() {
         quoteClient: _ThrowingQuoteClient(),
       );
       await repo.init();
-      final you = repo.profiles.first;
       repo.settings = repo.settings.copyWith(onboardingComplete: true);
       repo.rates = rates;
       repo.quotes = {

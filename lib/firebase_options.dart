@@ -7,7 +7,8 @@
 // - Google sign-in enabled
 // - Authorized domains include michaelady.github.io and localhost
 // - Firestore default DB, Standard, eur3, production mode
-// - firestore.rules published (uid-only access on users/{userId}/**)
+// - firestore.rules published (uid-only on users/{userId}/**;
+//   unsigned household invites on households/{id})
 
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'

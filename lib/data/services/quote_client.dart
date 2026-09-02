@@ -281,7 +281,11 @@ class AlphaVantageHistoryClient {
     http.Client? client,
     this.premium = false,
     this.minRequestGap = defaultMinRequestGap,
-  }) : _client = client ?? http.Client();
+    DateTime Function()? clock,
+    Future<void> Function(Duration duration)? delay,
+  })  : _client = client ?? http.Client(),
+        _clock = clock ?? DateTime.now,
+        _delay = delay ?? ((d) => Future<void>.delayed(d));
 
   /// Free plan: 5 history calls per minute. Space HTTP starts by 12s.
   static const defaultMinRequestGap = Duration(seconds: 12);
@@ -292,6 +296,8 @@ class AlphaVantageHistoryClient {
   /// When true, request `outputsize=full`. Default compact for free keys.
   final bool premium;
   final Duration minRequestGap;
+  final DateTime Function() _clock;
+  final Future<void> Function(Duration duration) _delay;
   final Map<String, _CachedDaily> _cache = {};
   final Map<String, Future<List<PricePoint>>> _inflight = {};
   DateTime? _lastRequestAt;
@@ -364,12 +370,12 @@ class AlphaVantageHistoryClient {
       }
       final last = _lastRequestAt;
       if (last != null && minRequestGap > Duration.zero) {
-        final wait = minRequestGap - DateTime.now().difference(last);
+        final wait = minRequestGap - _clock().difference(last);
         if (wait > Duration.zero) {
-          await Future<void>.delayed(wait);
+          await _delay(wait);
         }
       }
-      _lastRequestAt = DateTime.now();
+      _lastRequestAt = _clock();
     } finally {
       starter.complete();
     }
@@ -491,7 +497,11 @@ class TwelveDataHistoryClient {
     required this.apiKey,
     http.Client? client,
     this.minRequestGap = defaultMinRequestGap,
-  }) : _client = client ?? http.Client();
+    DateTime Function()? clock,
+    Future<void> Function(Duration duration)? delay,
+  })  : _client = client ?? http.Client(),
+        _clock = clock ?? DateTime.now,
+        _delay = delay ?? ((d) => Future<void>.delayed(d));
 
   /// Free plan: 8 history calls per minute. Space HTTP starts by 8s.
   static const defaultMinRequestGap = Duration(seconds: 8);
@@ -499,6 +509,8 @@ class TwelveDataHistoryClient {
   final String apiKey;
   final http.Client _client;
   final Duration minRequestGap;
+  final DateTime Function() _clock;
+  final Future<void> Function(Duration duration) _delay;
   final Map<String, _CachedDaily> _cache = {};
   final Map<String, Future<List<PricePoint>>> _inflight = {};
   DateTime? _lastRequestAt;
@@ -553,12 +565,12 @@ class TwelveDataHistoryClient {
       }
       final last = _lastRequestAt;
       if (last != null && minRequestGap > Duration.zero) {
-        final wait = minRequestGap - DateTime.now().difference(last);
+        final wait = minRequestGap - _clock().difference(last);
         if (wait > Duration.zero) {
-          await Future<void>.delayed(wait);
+          await _delay(wait);
         }
       }
-      _lastRequestAt = DateTime.now();
+      _lastRequestAt = _clock();
     } finally {
       starter.complete();
     }

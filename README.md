@@ -25,7 +25,7 @@ Deployed automatically via GitHub Actions (`.github/workflows/deploy-web.yml`) o
 
 Unsigned-in use stays fully local. Signing in with Google (Settings or User) writes `FinanceSnapshot` JSON to Firestore at `users/{uid}/data/snapshot` plus `updatedAt`. Quote API tokens and the quote cache stay on the device only.
 
-Household invite links (jsonblob) are **not** identity and keep working without Firebase.
+Household invite links (`?hh=` + `k=`, stored in Firestore `households/{id}`) are **not** identity and work without signing in.
 
 ### Client config
 

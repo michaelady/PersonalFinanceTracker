@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zentho/data/repositories/finance_repository.dart';
@@ -165,5 +167,45 @@ void main() {
       host.transactions.any((t) => t.note == 'Shared coffee'),
       isTrue,
     );
+  });
+
+  test('cloud doc is packed snapshot without quote cache or API tokens',
+      () async {
+    final cloud = MemoryCloudStore();
+    final host = await readyRepo(cloud);
+    await host.setFinnhubToken('secret-finnhub-token');
+    await host.setAlphaVantageToken('secret-av-token');
+    await host.setTwelveDataToken('secret-td-token');
+    host.quotes = {
+      'AAPL': CachedQuote(
+        symbol: 'AAPL',
+        price: 100,
+        currency: 'USD',
+        fetchedAt: DateTime.utc(2026, 9, 2),
+        source: 'yahoo',
+      ),
+    };
+
+    await host.enableHouseholdSharing(
+      base: Uri.parse('https://example.test/'),
+    );
+
+    expect(cloud.docs, hasLength(1));
+    final body = cloud.docs.values.single;
+    expect(body.keys, containsAll(['v', 'inviteKey', 'updatedAt', 'snapshot']));
+    expect(body['updatedAt'], isA<String>());
+    expect((body['inviteKey'] as String).length, greaterThanOrEqualTo(8));
+    expect(body.containsKey('quotes'), isFalse);
+
+    final snapshot = Map<String, dynamic>.from(body['snapshot'] as Map);
+    expect(snapshot.containsKey('quotes'), isFalse);
+    expect(snapshot.containsKey('finnhubToken'), isFalse);
+    expect(snapshot.containsKey('alphaVantageToken'), isFalse);
+    expect(snapshot.containsKey('twelveDataToken'), isFalse);
+
+    final encoded = jsonEncode(body);
+    expect(encoded.contains('secret-finnhub-token'), isFalse);
+    expect(encoded.contains('secret-av-token'), isFalse);
+    expect(encoded.contains('secret-td-token'), isFalse);
   });
 }

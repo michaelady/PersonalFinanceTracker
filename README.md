@@ -27,26 +27,11 @@ Unsigned-in use stays fully local. Signing in with Google (Settings or User) wri
 
 Household invite links (jsonblob) are **not** identity and keep working without Firebase.
 
-### One-file client config
+### Client config
 
-Paste the Firebase **web** app public SDK values into `lib/firebase_options.dart` (`apiKey`, `authDomain`, `projectId`, `storageBucket`, `messagingSenderId`, `appId`). That file is the only client change needed. The web `apiKey` is not a secret. **Never commit a service-account JSON.**
+Public web SDK values live in `lib/firebase_options.dart` (project `zentho-db83e`). The web `apiKey` is not a secret. **Never commit a service-account JSON.** Analytics is off.
 
-Until those fields are filled, the app skips `Firebase.initializeApp` and behaves as today (local only).
-
-### Firebase console (Spark is enough)
-
-1. Enable **Google** under Authentication → Sign-in method.
-2. Add authorized domain **`michaelady.github.io`** (Authentication → Settings → Authorized domains). Also add `localhost` for local web.
-3. Create a **Cloud Firestore** database (native mode).
-4. Deploy rules from this repo:
-
-```bash
-firebase deploy --only firestore:rules
-```
-
-Rules in `firestore.rules` allow read/write only when `request.auth.uid == userId` on `users/{userId}/{document=**}`.
-
-5. Authorized JavaScript origin for the OAuth client: `https://michaelady.github.io`.
+Firebase console setup is already done on Spark: Google sign-in, authorized domains `michaelady.github.io` and `localhost`, Firestore (`eur3`, production mode), and `firestore.rules` published (`request.auth.uid == userId` on `users/{userId}/{document=**}`). Do not recreate those. Spark is enough — do not enable Blaze.
 
 On sign-in: if cloud has a snapshot and it is newer (or this device has no ledger yet), cloud is loaded into local storage. If only this device has data, it is uploaded. Sign-out does not wipe the local copy.
 

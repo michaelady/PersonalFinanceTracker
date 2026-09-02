@@ -447,6 +447,159 @@ class _CachedDaily {
   final List<PricePoint> points;
 }
 
+/// Compile-time Twelve Data key from `--dart-define=TWELVEDATA_API_KEY=...`.
+/// Empty when the define is omitted. Never commit a real key.
+const bakedTwelveDataApiKey = String.fromEnvironment(
+  'TWELVEDATA_API_KEY',
+  defaultValue: '',
+);
+
+/// User-saved token wins; otherwise the compile-time baked key.
+String? resolveTwelveDataApiKey({
+  String? userToken,
+  String bakedToken = bakedTwelveDataApiKey,
+}) {
+  final user = userToken?.trim();
+  if (user != null && user.isNotEmpty) return user;
+  final baked = bakedToken.trim();
+  if (baked.isNotEmpty) return baked;
+  return null;
+}
+
+/// Builds a Twelve Data history client only when a non-empty key is available.
+TwelveDataHistoryClient? createTwelveDataHistoryClient({
+  String? userToken,
+  String bakedToken = bakedTwelveDataApiKey,
+  http.Client? client,
+}) {
+  final token = resolveTwelveDataApiKey(
+    userToken: userToken,
+    bakedToken: bakedToken,
+  );
+  if (token == null) return null;
+  return TwelveDataHistoryClient(apiKey: token, client: client);
+}
+
+/// CORS-open daily history (`time_series`, `interval=1day`). Used on web after
+/// Yahoo fails, Finnhub candles are unavailable, and Alpha Vantage returns no
+/// series (`Information` / quota wall). Not used for last price.
+///
+/// Free plan is 8 requests/minute. HTTP starts are spaced by 8s. One series
+/// (`outputsize=100`) is cached and sliced for 1M/3M; 1Y plots those points.
+class TwelveDataHistoryClient {
+  TwelveDataHistoryClient({
+    required this.apiKey,
+    http.Client? client,
+    this.minRequestGap = defaultMinRequestGap,
+  }) : _client = client ?? http.Client();
+
+  /// Free plan: 8 history calls per minute. Space HTTP starts by 8s.
+  static const defaultMinRequestGap = Duration(seconds: 8);
+
+  final String apiKey;
+  final http.Client _client;
+  final Duration minRequestGap;
+  final Map<String, _CachedDaily> _cache = {};
+  final Map<String, Future<List<PricePoint>>> _inflight = {};
+  DateTime? _lastRequestAt;
+  Future<void>? _requestChain;
+
+  /// One daily series per ticker (~100 trading days). Reused across 1M/3M/1Y.
+  Future<List<PricePoint>> fetchDailyHistory(String symbol) {
+    final ticker = symbol.trim().toUpperCase();
+    final cached = _cache[ticker];
+    if (cached != null && PortfolioMath.quoteIsFresh(cached.at)) {
+      return Future.value(cached.points);
+    }
+    final pending = _inflight[ticker];
+    if (pending != null) return pending;
+    final future = _downloadDailyHistory(ticker);
+    _inflight[ticker] = future;
+    return future.whenComplete(() => _inflight.remove(ticker));
+  }
+
+  Future<List<PricePoint>> _downloadDailyHistory(String ticker) async {
+    await _awaitRequestGap();
+    final uri = Uri.https('api.twelvedata.com', '/time_series', {
+      'symbol': ticker,
+      'interval': '1day',
+      'outputsize': '100',
+      'apikey': apiKey,
+    });
+    final res = await _client.get(uri).timeout(const Duration(seconds: 15));
+    if (res.statusCode == 401) {
+      throw StateError('Twelve Data HTTP 401 for $ticker');
+    }
+    if (res.statusCode != 200) {
+      throw StateError('Twelve Data HTTP ${res.statusCode} for $ticker');
+    }
+    final json = jsonDecode(res.body) as Map<String, dynamic>;
+    final points = parseTimeSeries(json);
+    if (points.length < 2) {
+      throw StateError('Twelve Data returned no daily history for $ticker');
+    }
+    _cache[ticker] = _CachedDaily(DateTime.now().toUtc(), points);
+    return points;
+  }
+
+  /// Serialize history GETs and space them by [minRequestGap] (8/min).
+  Future<void> _awaitRequestGap() async {
+    final starter = Completer<void>();
+    final previous = _requestChain;
+    _requestChain = starter.future;
+    try {
+      if (previous != null) {
+        await previous;
+      }
+      final last = _lastRequestAt;
+      if (last != null && minRequestGap > Duration.zero) {
+        final wait = minRequestGap - DateTime.now().difference(last);
+        if (wait > Duration.zero) {
+          await Future<void>.delayed(wait);
+        }
+      }
+      _lastRequestAt = DateTime.now();
+    } finally {
+      starter.complete();
+    }
+  }
+
+  /// `values[]` with `datetime` + `close`. `status=error` is no history.
+  static List<PricePoint> parseTimeSeries(Map<String, dynamic> json) {
+    if (json['status'] == 'error') return const [];
+    final values = json['values'] as List?;
+    if (values == null || values.isEmpty) return const [];
+    final out = <PricePoint>[];
+    for (final raw in values) {
+      if (raw is! Map) continue;
+      final map = Map<String, dynamic>.from(raw);
+      final date = _parseUtcDate(map['datetime']?.toString() ?? '');
+      final close = _parseClose(map['close']);
+      if (date == null || close == null) continue;
+      out.add(PricePoint(date: date, close: close));
+    }
+    out.sort((a, b) => a.date.compareTo(b.date));
+    return out;
+  }
+
+  static DateTime? _parseUtcDate(String raw) {
+    final datePart = raw.trim().split(RegExp(r'[ T]')).first;
+    final parts = datePart.split('-');
+    if (parts.length < 3) return null;
+    final y = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    final d = int.tryParse(parts[2]);
+    if (y == null || m == null || d == null) return null;
+    return DateTime.utc(y, m, d);
+  }
+
+  static double? _parseClose(dynamic raw) {
+    if (raw is num) return raw.toDouble();
+    if (raw is String) return double.tryParse(raw);
+    return null;
+  }
+}
+
 /// Finnhub quote + candle. Token is user-provided (local only) or a
 /// compile-time `--dart-define=FINNHUB_API_KEY` baked into a release build.
 class FinnhubQuoteClient implements QuoteClient {
@@ -617,22 +770,26 @@ class FinnhubQuoteClient implements QuoteClient {
 
 /// Try Yahoo first (native Android/Windows). On failure, Finnhub quote (and
 /// candles when the plan allows). If candles are missing, Alpha Vantage daily
-/// history is the CORS-open web fallback. Never uses a CORS proxy.
+/// history is tried, then Twelve Data when AV is missing or throws
+/// `Information`. Never uses a CORS proxy.
 class CompositeQuoteClient implements QuoteClient {
   CompositeQuoteClient({
     required this.yahoo,
     this.finnhub,
     this.alphaVantage,
+    this.twelveData,
   });
 
-  /// Yahoo plus optional Finnhub / Alpha Vantage. User-saved tokens override
-  /// compile-time baked keys.
+  /// Yahoo plus optional Finnhub / Alpha Vantage / Twelve Data. User-saved
+  /// tokens override compile-time baked keys.
   factory CompositeQuoteClient.fromTokens({
     required QuoteClient yahoo,
     String? userToken,
     String bakedToken = bakedFinnhubApiKey,
     String? alphaVantageUserToken,
     String alphaVantageBakedToken = bakedAlphaVantageApiKey,
+    String? twelveDataUserToken,
+    String twelveDataBakedToken = bakedTwelveDataApiKey,
     http.Client? httpClient,
   }) {
     return CompositeQuoteClient(
@@ -647,12 +804,18 @@ class CompositeQuoteClient implements QuoteClient {
         bakedToken: alphaVantageBakedToken,
         client: httpClient,
       ),
+      twelveData: createTwelveDataHistoryClient(
+        userToken: twelveDataUserToken,
+        bakedToken: twelveDataBakedToken,
+        client: httpClient,
+      ),
     );
   }
 
   final QuoteClient yahoo;
   final QuoteClient? finnhub;
   final AlphaVantageHistoryClient? alphaVantage;
+  final TwelveDataHistoryClient? twelveData;
 
   @override
   Future<QuoteBundle> fetchChart(
@@ -677,55 +840,86 @@ class CompositeQuoteClient implements QuoteClient {
   }
 
   /// Finnhub last price is kept. Empty / 403 candles get Alpha Vantage daily
-  /// closes when a key is available (one compact series, sliced for 1M/3M).
+  /// closes, then Twelve Data when AV is missing or throws `Information`.
   Future<QuoteBundle> _attachDailyHistory(
     QuoteBundle bundle,
     String symbol,
     QuoteHistoryRange range,
   ) async {
     if (bundle.history.length >= 2) return bundle;
+
+    var avPerMinute = false;
     final av = alphaVantage;
-    if (av == null) return bundle;
-    try {
-      final year = await av.fetchDailyHistory(symbol);
-      final at = DateTime.now().toUtc();
-      var quote = bundle.quote.copyWith(
-        history: {
-          ...bundle.quote.history,
-          QuoteHistoryRange.oneYear.key: year,
-        },
-        historyFetchedAt: {
-          ...bundle.quote.historyFetchedAt,
-          QuoteHistoryRange.oneYear.key: at,
-        },
-      );
-      final sliced = PortfolioMath.storedHistoryForRange(quote, range);
-      if (sliced.length < 2) return bundle;
-      quote = quote.copyWith(
-        history: {
-          ...quote.history,
-          range.key: sliced,
-        },
-        historyFetchedAt: {
-          ...quote.historyFetchedAt,
-          range.key: at,
-        },
-      );
-      return QuoteBundle(quote: quote, history: sliced, range: range);
-    } catch (error) {
-      if (AlphaVantageHistoryClient.isPerMinuteThrottleError(error)) {
-        // Do not stamp empty history as a successful miss — retry after the
-        // 12s spacing window. Daily-quota errors keep Finnhub's stamp.
-        final fetched = Map<String, DateTime>.from(bundle.quote.historyFetchedAt)
-          ..remove(range.key);
-        return QuoteBundle(
-          quote: bundle.quote.copyWith(historyFetchedAt: fetched),
-          history: bundle.history,
-          range: range,
+    if (av != null) {
+      try {
+        return _withSlicedDailyHistory(
+          bundle,
+          range,
+          await av.fetchDailyHistory(symbol),
         );
+      } catch (error) {
+        if (AlphaVantageHistoryClient.isPerMinuteThrottleError(error)) {
+          avPerMinute = true;
+        }
       }
-      return bundle;
     }
+
+    final td = twelveData;
+    if (td != null) {
+      try {
+        return _withSlicedDailyHistory(
+          bundle,
+          range,
+          await td.fetchDailyHistory(symbol),
+        );
+      } catch (_) {
+        // Twelve Data 401 / status=error / empty series: keep Finnhub quote.
+      }
+    }
+
+    if (avPerMinute) {
+      // Do not stamp empty history as a successful miss — retry after the
+      // 12s spacing window. Daily-quota errors keep Finnhub's stamp.
+      final fetched = Map<String, DateTime>.from(bundle.quote.historyFetchedAt)
+        ..remove(range.key);
+      return QuoteBundle(
+        quote: bundle.quote.copyWith(historyFetchedAt: fetched),
+        history: bundle.history,
+        range: range,
+      );
+    }
+    return bundle;
+  }
+
+  QuoteBundle _withSlicedDailyHistory(
+    QuoteBundle bundle,
+    QuoteHistoryRange range,
+    List<PricePoint> year,
+  ) {
+    final at = DateTime.now().toUtc();
+    var quote = bundle.quote.copyWith(
+      history: {
+        ...bundle.quote.history,
+        QuoteHistoryRange.oneYear.key: year,
+      },
+      historyFetchedAt: {
+        ...bundle.quote.historyFetchedAt,
+        QuoteHistoryRange.oneYear.key: at,
+      },
+    );
+    final sliced = PortfolioMath.storedHistoryForRange(quote, range);
+    if (sliced.length < 2) return bundle;
+    quote = quote.copyWith(
+      history: {
+        ...quote.history,
+        range.key: sliced,
+      },
+      historyFetchedAt: {
+        ...quote.historyFetchedAt,
+        range.key: at,
+      },
+    );
+    return QuoteBundle(quote: quote, history: sliced, range: range);
   }
 
   @override

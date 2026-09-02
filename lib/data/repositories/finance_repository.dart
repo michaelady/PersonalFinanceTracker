@@ -39,6 +39,7 @@ class FinanceRepository extends ChangeNotifier {
   CompositeQuoteClient? _compositeClient;
   String? _compositeFinnhubToken;
   String? _compositeAlphaVantageToken;
+  String? _compositeTwelveDataToken;
 
   bool loading = true;
   String? error;
@@ -65,6 +66,7 @@ class FinanceRepository extends ChangeNotifier {
   Map<String, CachedQuote> quotes = {};
   String? finnhubToken;
   String? alphaVantageToken;
+  String? twelveDataToken;
 
   bool quotesRefreshing = false;
   String? quotesError;
@@ -86,6 +88,7 @@ class FinanceRepository extends ChangeNotifier {
       quotes = await _store.loadQuotes();
       finnhubToken = await _store.loadFinnhubToken();
       alphaVantageToken = await _store.loadAlphaVantageToken();
+      twelveDataToken = await _store.loadTwelveDataToken();
     } catch (e) {
       error = e.toString();
       _seedEmpty();
@@ -279,14 +282,17 @@ class FinanceRepository extends ChangeNotifier {
     final yahoo = _yahooClient ??= YahooQuoteClient();
     if (_compositeClient == null ||
         _compositeFinnhubToken != finnhubToken ||
-        _compositeAlphaVantageToken != alphaVantageToken) {
+        _compositeAlphaVantageToken != alphaVantageToken ||
+        _compositeTwelveDataToken != twelveDataToken) {
       _compositeClient = CompositeQuoteClient.fromTokens(
         yahoo: yahoo,
         userToken: finnhubToken,
         alphaVantageUserToken: alphaVantageToken,
+        twelveDataUserToken: twelveDataToken,
       );
       _compositeFinnhubToken = finnhubToken;
       _compositeAlphaVantageToken = alphaVantageToken;
+      _compositeTwelveDataToken = twelveDataToken;
     }
     return _compositeClient!;
   }
@@ -494,6 +500,7 @@ class FinanceRepository extends ChangeNotifier {
     quotes = {};
     finnhubToken = null;
     alphaVantageToken = null;
+    twelveDataToken = null;
     quotesError = null;
     quotesSource = null;
     quotesUpdatedAt = null;
@@ -925,6 +932,16 @@ class FinanceRepository extends ChangeNotifier {
     }
   }
 
+  Future<void> setTwelveDataToken(String? token) async {
+    final trimmed = token?.trim();
+    twelveDataToken = (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+    await _store.saveTwelveDataToken(twelveDataToken);
+    notifyListeners();
+    if (holdings.isNotEmpty) {
+      await refreshQuotes(force: true);
+    }
+  }
+
   Future<List<TickerSearchResult>> searchTickers(String query) async {
     try {
       return await _quoteClient.search(query);
@@ -1019,8 +1036,9 @@ class FinanceRepository extends ChangeNotifier {
 
   /// Skip a network fetch when this range (or a longer cached series) is fresh.
   /// Empty history with a fresh timestamp means we already tried (e.g. Finnhub
-  /// 403 + Alpha Vantage daily-quota miss) and should not burn the 25/day limit.
-  /// Per-minute Alpha Vantage throttles are not stamped, so they can retry.
+  /// 403 + Alpha Vantage daily-quota miss + Twelve Data miss) and should not
+  /// burn the 25/day or 8/min limits. Per-minute Alpha Vantage throttles are
+  /// not stamped, so they can retry.
   bool _historyCacheFresh(CachedQuote cached, QuoteHistoryRange range) {
     final stored = PortfolioMath.storedHistoryForRange(cached, range);
     if (stored.length >= 2) {

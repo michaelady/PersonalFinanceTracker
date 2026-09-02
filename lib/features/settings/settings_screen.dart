@@ -167,6 +167,19 @@ class SettingsScreen extends StatelessWidget {
                 trailing: const Icon(Icons.edit_outlined),
                 onTap: () => _editAlphaVantageToken(context, repo),
               ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.timeline_outlined),
+                title: const Text('Twelve Data API key (optional)'),
+                subtitle: Text(
+                  repo.twelveDataToken != null &&
+                          repo.twelveDataToken!.isNotEmpty
+                      ? 'Saved on this device only — web chart fallback'
+                      : 'Website default (if any) is used when Alpha Vantage is blocked.',
+                ),
+                trailing: const Icon(Icons.edit_outlined),
+                onTap: () => _editTwelveDataToken(context, repo),
+              ),
               const SizedBox(height: 16),
               Text('Data', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
@@ -229,7 +242,7 @@ class SettingsScreen extends StatelessWidget {
               const SizedBox(height: 24),
               Text(
                 'Offline-first · share household by invite link · '
-                'quotes from Yahoo Finance (Finnhub + Alpha Vantage on web)',
+                'quotes from Yahoo Finance (Finnhub + Alpha Vantage + Twelve Data on web)',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ],
@@ -460,6 +473,63 @@ class SettingsScreen extends StatelessWidget {
     );
     if (ok == true) {
       await repo.setAlphaVantageToken(controller.text);
+    }
+    controller.dispose();
+  }
+
+  Future<void> _editTwelveDataToken(
+    BuildContext context,
+    FinanceRepository repo,
+  ) async {
+    final controller =
+        TextEditingController(text: repo.twelveDataToken ?? '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Twelve Data API key'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Optional. Stored only on this device. Daily history when '
+              'Alpha Vantage is blocked. Free key at twelvedata.com. Leave '
+              'blank to use the website default (if any).',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(
+                labelText: 'API key',
+                hintText: 'Paste key',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              controller.clear();
+              Navigator.pop(context, true);
+            },
+            child: const Text('Clear'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await repo.setTwelveDataToken(controller.text);
     }
     controller.dispose();
   }

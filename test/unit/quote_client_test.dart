@@ -711,6 +711,340 @@ void main() {
       isTrue,
     );
   });
+
+  test('Twelve Data parser reads demo-like AAPL values oldest-first', () {
+    final points = TwelveDataHistoryClient.parseTimeSeries({
+      'meta': {'symbol': 'AAPL', 'interval': '1day'},
+      'values': [
+        {'datetime': '2026-09-02', 'close': '132.27'},
+        {'datetime': '2026-08-03 15:59:00', 'close': '110.00'},
+        {'datetime': '2026-07-01', 'close': '100.50'},
+      ],
+      'status': 'ok',
+    });
+    expect(points, hasLength(3));
+    expect(points.first.date, DateTime.utc(2026, 7, 1));
+    expect(points.first.close, closeTo(100.50, 0.0001));
+    expect(points.last.close, closeTo(132.27, 0.0001));
+  });
+
+  test('Twelve Data 401 and status=error are no history', () async {
+    expect(
+      TwelveDataHistoryClient.parseTimeSeries({
+        'code': 401,
+        'message': 'Invalid API key.',
+        'status': 'error',
+      }),
+      isEmpty,
+    );
+    expect(
+      TwelveDataHistoryClient.parseTimeSeries({
+        'code': 400,
+        'message': '**symbol** or **figi** parameter is missing or invalid.',
+        'status': 'error',
+      }),
+      isEmpty,
+    );
+
+    final unauthorized = MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'code': 401,
+          'message': 'Invalid API key.',
+          'status': 'error',
+        }),
+        401,
+      );
+    });
+    expect(
+      () => TwelveDataHistoryClient(
+        apiKey: 'test-td-key',
+        client: unauthorized,
+        minRequestGap: Duration.zero,
+      ).fetchDailyHistory('SMTC'),
+      throwsA(isA<StateError>()),
+    );
+
+    final unknown = MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'code': 400,
+          'message': '**symbol** or **figi** parameter is missing or invalid.',
+          'status': 'error',
+        }),
+        200,
+      );
+    });
+    expect(
+      () => TwelveDataHistoryClient(
+        apiKey: 'test-td-key',
+        client: unknown,
+        minRequestGap: Duration.zero,
+      ).fetchDailyHistory('UNKNOWN'),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('Twelve Data history URL uses interval=1day and outputsize=100',
+      () async {
+    late http.Request seen;
+    final client = MockClient((request) async {
+      seen = request;
+      return http.Response(
+        jsonEncode(_twelveDataDaily('AAPL', {
+          '2026-09-01': '10.00',
+          '2026-09-02': '11.00',
+        })),
+        200,
+      );
+    });
+    await TwelveDataHistoryClient(
+      apiKey: 'test-td-key',
+      client: client,
+      minRequestGap: Duration.zero,
+    ).fetchDailyHistory('aapl');
+    expect(seen.url.host, 'api.twelvedata.com');
+    expect(seen.url.path, '/time_series');
+    expect(seen.url.queryParameters['symbol'], 'AAPL');
+    expect(seen.url.queryParameters['interval'], '1day');
+    expect(seen.url.queryParameters['outputsize'], '100');
+    expect(seen.url.queryParameters['apikey'], 'test-td-key');
+    expect(
+      TwelveDataHistoryClient.defaultMinRequestGap,
+      const Duration(seconds: 8),
+    );
+  });
+
+  test('empty baked Twelve Data key does not construct a client', () {
+    expect(
+      createTwelveDataHistoryClient(userToken: null, bakedToken: ''),
+      isNull,
+    );
+    expect(
+      createTwelveDataHistoryClient(userToken: '  ', bakedToken: '   '),
+      isNull,
+    );
+    final composite = CompositeQuoteClient.fromTokens(
+      yahoo: YahooQuoteClient(),
+      userToken: null,
+      bakedToken: '',
+      alphaVantageUserToken: null,
+      alphaVantageBakedToken: '',
+      twelveDataUserToken: null,
+      twelveDataBakedToken: '',
+    );
+    expect(composite.twelveData, isNull);
+  });
+
+  test('user-saved Twelve Data key overrides baked key', () {
+    final client = createTwelveDataHistoryClient(
+      userToken: '  user-td-key  ',
+      bakedToken: 'baked-td-key',
+    );
+    expect(client, isA<TwelveDataHistoryClient>());
+    expect(client!.apiKey, 'user-td-key');
+
+    final emptyUserFallsBack = createTwelveDataHistoryClient(
+      userToken: '',
+      bakedToken: 'baked-td-key',
+    );
+    expect(emptyUserFallsBack!.apiKey, 'baked-td-key');
+  });
+
+  test(
+      'Finnhub candle 403 and Alpha Vantage Information then Twelve Data history',
+      () async {
+    final now = DateTime.now().toUtc();
+    final tdBody = _twelveDataDaily('SMTC', {
+      _ymd(now.subtract(const Duration(days: 20))): '110.00',
+      _ymd(now.subtract(const Duration(days: 10))): '120.00',
+      _ymd(now.subtract(const Duration(days: 1))): '130.00',
+      _ymd(now): '132.27',
+    });
+    var avHits = 0;
+    var tdHits = 0;
+    var candleHits = 0;
+    final client = MockClient((request) async {
+      if (request.url.host.contains('yahoo')) {
+        throw http.ClientException('Failed to fetch', request.url);
+      }
+      if (request.url.host.contains('alphavantage')) {
+        avHits++;
+        return http.Response(
+          jsonEncode({
+            'Information':
+                'This is a premium endpoint. Please subscribe to any of the premium plans.',
+          }),
+          200,
+        );
+      }
+      if (request.url.host.contains('twelvedata')) {
+        tdHits++;
+        expect(request.url.path, '/time_series');
+        expect(request.url.queryParameters['interval'], '1day');
+        expect(request.url.queryParameters['outputsize'], '100');
+        expect(request.url.queryParameters['symbol'], 'SMTC');
+        expect(request.url.queryParameters['apikey'], 'test-td-key');
+        return http.Response(jsonEncode(tdBody), 200);
+      }
+      if (request.url.path.contains('/quote')) {
+        return http.Response(
+          jsonEncode({'c': 132.27, 'dp': 1.1, 'pc': 130.0}),
+          200,
+        );
+      }
+      if (request.url.path.contains('/candle')) {
+        candleHits++;
+        return http.Response(
+          '{"error":"You don\'t have access to this resource."}',
+          403,
+        );
+      }
+      fail('Unexpected ${request.url}');
+    });
+
+    final composite = CompositeQuoteClient(
+      yahoo: YahooQuoteClient(client: client),
+      finnhub: FinnhubQuoteClient(token: 'free-token', client: client),
+      alphaVantage: AlphaVantageHistoryClient(
+        apiKey: 'test-av-key',
+        client: client,
+        minRequestGap: Duration.zero,
+      ),
+      twelveData: TwelveDataHistoryClient(
+        apiKey: 'test-td-key',
+        client: client,
+        minRequestGap: Duration.zero,
+      ),
+    );
+    final bundle = await composite.fetchChart('SMTC');
+    expect(bundle.quote.source, 'finnhub');
+    expect(bundle.quote.price, closeTo(132.27, 0.0001));
+    expect(bundle.history.length, greaterThanOrEqualTo(2));
+    expect(bundle.history.last.close, closeTo(132.27, 0.0001));
+    expect(bundle.quote.history[QuoteHistoryRange.oneYear.key], isNotEmpty);
+    expect(avHits, 1);
+    expect(tdHits, 1);
+    expect(candleHits, 1);
+    expect(
+      PortfolioMath.usesLastCloseFallback(
+        bundle.quote,
+        QuoteHistoryRange.oneMonth,
+      ),
+      isFalse,
+    );
+
+    final yearBundle = await composite.fetchChart(
+      'SMTC',
+      range: QuoteHistoryRange.oneYear,
+    );
+    expect(tdHits, 1);
+    expect(yearBundle.history.length, greaterThanOrEqualTo(2));
+    expect(candleHits, 1);
+  });
+
+  test('Yahoo success does not call Twelve Data', () async {
+    var tdHits = 0;
+    final client = MockClient((request) async {
+      if (request.url.host.contains('yahoo')) {
+        return http.Response(jsonEncode(yahooChart), 200);
+      }
+      tdHits++;
+      return http.Response('nope', 500);
+    });
+    final composite = CompositeQuoteClient(
+      yahoo: YahooQuoteClient(client: client),
+      finnhub: FinnhubQuoteClient(token: 'unused', client: client),
+      twelveData: TwelveDataHistoryClient(
+        apiKey: 'test-td-key',
+        client: client,
+        minRequestGap: Duration.zero,
+      ),
+    );
+    final bundle = await composite.fetchChart('AAPL');
+    expect(bundle.quote.source, 'yahoo');
+    expect(tdHits, 0);
+  });
+
+  test('Alpha Vantage success does not call Twelve Data', () async {
+    final now = DateTime.now().toUtc();
+    var tdHits = 0;
+    final client = MockClient((request) async {
+      if (request.url.host.contains('yahoo')) {
+        throw http.ClientException('Failed to fetch', request.url);
+      }
+      if (request.url.host.contains('alphavantage')) {
+        return http.Response(
+          jsonEncode(_alphaVantageDaily({
+            _ymd(now.subtract(const Duration(days: 10))): '120.00',
+            _ymd(now): '132.27',
+          })),
+          200,
+        );
+      }
+      if (request.url.host.contains('twelvedata')) {
+        tdHits++;
+        return http.Response('nope', 500);
+      }
+      if (request.url.path.contains('/quote')) {
+        return http.Response(
+          jsonEncode({'c': 132.27, 'dp': 1.1, 'pc': 130.0}),
+          200,
+        );
+      }
+      if (request.url.path.contains('/candle')) {
+        return http.Response(
+          '{"error":"You don\'t have access to this resource."}',
+          403,
+        );
+      }
+      fail('Unexpected ${request.url}');
+    });
+    final composite = CompositeQuoteClient(
+      yahoo: YahooQuoteClient(client: client),
+      finnhub: FinnhubQuoteClient(token: 'free-token', client: client),
+      alphaVantage: AlphaVantageHistoryClient(
+        apiKey: 'test-av-key',
+        client: client,
+        minRequestGap: Duration.zero,
+      ),
+      twelveData: TwelveDataHistoryClient(
+        apiKey: 'test-td-key',
+        client: client,
+        minRequestGap: Duration.zero,
+      ),
+    );
+    final bundle = await composite.fetchChart('SMTC');
+    expect(bundle.history.length, greaterThanOrEqualTo(2));
+    expect(tdHits, 0);
+  });
+
+  test('Twelve Data spaces history fetches for different tickers', () async {
+    final startedAt = <DateTime>[];
+    final client = MockClient((request) async {
+      startedAt.add(DateTime.now());
+      final symbol = request.url.queryParameters['symbol']!;
+      return http.Response(
+        jsonEncode(_twelveDataDaily(symbol, {
+          '2026-09-01': '10.00',
+          '2026-09-02': symbol == 'AAPL' ? '11.00' : '12.00',
+        })),
+        200,
+      );
+    });
+    final td = TwelveDataHistoryClient(
+      apiKey: 'test-td-key',
+      client: client,
+      minRequestGap: const Duration(milliseconds: 40),
+    );
+    await td.fetchDailyHistory('AAPL');
+    await td.fetchDailyHistory('MSFT');
+    expect(startedAt, hasLength(2));
+    expect(
+      startedAt[1].difference(startedAt[0]) >= const Duration(milliseconds: 40),
+      isTrue,
+    );
+  });
 }
 
 String _ymd(DateTime d) {
@@ -726,5 +1060,20 @@ Map<String, dynamic> _alphaVantageDaily(Map<String, String> closesByDate) {
     'Time Series (Daily)': {
       for (final e in closesByDate.entries) e.key: {'4. close': e.value},
     },
+  };
+}
+
+Map<String, dynamic> _twelveDataDaily(
+  String symbol,
+  Map<String, String> closesByDate,
+) {
+  final newestFirst = closesByDate.entries.toList()
+    ..sort((a, b) => b.key.compareTo(a.key));
+  return {
+    'meta': {'symbol': symbol, 'interval': '1day'},
+    'values': [
+      for (final e in newestFirst) {'datetime': e.key, 'close': e.value},
+    ],
+    'status': 'ok',
   };
 }

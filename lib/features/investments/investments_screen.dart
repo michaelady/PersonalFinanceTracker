@@ -817,6 +817,7 @@ String? _sourceLabel(String? source) {
     'yahoo' => 'Yahoo Finance',
     'finnhub' => 'Finnhub',
     'alphavantage' => 'Alpha Vantage',
+    'twelvedata' => 'Twelve Data',
     null => null,
     _ => source,
   };

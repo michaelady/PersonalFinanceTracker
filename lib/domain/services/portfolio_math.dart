@@ -307,6 +307,19 @@ abstract final class PortfolioMath {
     return const [];
   }
 
+  /// Lots that feed the performance chart. `null` [selectedHoldingId] is the
+  /// full visible book; otherwise only that holding (empty if it is gone).
+  static List<InvestmentHolding> holdingsForChart({
+    required List<InvestmentHolding> visible,
+    String? selectedHoldingId,
+  }) {
+    if (selectedHoldingId == null) return visible;
+    return [
+      for (final h in visible)
+        if (h.id == selectedHoldingId) h,
+    ];
+  }
+
   /// Portfolio (or single holding) market value in main currency over time.
   /// Uses current FX rates as a bridge — not historical FX.
   static List<PricePoint> performanceSeries({

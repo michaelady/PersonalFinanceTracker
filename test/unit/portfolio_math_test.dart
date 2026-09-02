@@ -186,5 +186,76 @@ void main() {
       // Aug 3: AAPL last 220 + VWCE 55*1.1 = 220 + 60.5 = 280.5
       expect(series[2].close, closeTo(280.5, 0.01));
     });
+
+    test('holdingsForChart selects the full book or a single lot', () {
+      final aapl = lot(ticker: 'AAPL', shares: 2, cost: 100);
+      final vwce = lot(ticker: 'VWCE.DE', shares: 1, cost: 50, currency: 'EUR');
+      expect(
+        PortfolioMath.holdingsForChart(
+          visible: [aapl, vwce],
+          selectedHoldingId: null,
+        ),
+        [aapl, vwce],
+      );
+      expect(
+        PortfolioMath.holdingsForChart(
+          visible: [aapl, vwce],
+          selectedHoldingId: aapl.id,
+        ),
+        [aapl],
+      );
+      expect(
+        PortfolioMath.holdingsForChart(
+          visible: [aapl, vwce],
+          selectedHoldingId: 'missing',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('selecting one holding changes the performance series vs the portfolio',
+        () {
+      final aapl = lot(ticker: 'AAPL', shares: 2, cost: 100);
+      final vwce = lot(ticker: 'VWCE.DE', shares: 1, cost: 50, currency: 'EUR');
+      final quotes = {
+        'AAPL': quote(symbol: 'AAPL', price: 120).copyWith(
+          history: {
+            '1mo': [
+              PricePoint(date: DateTime.utc(2026, 8, 1), close: 100),
+              PricePoint(date: DateTime.utc(2026, 8, 2), close: 110),
+            ],
+          },
+        ),
+        'VWCE.DE': quote(symbol: 'VWCE.DE', price: 60, currency: 'EUR').copyWith(
+          history: {
+            '1mo': [
+              PricePoint(date: DateTime.utc(2026, 8, 1), close: 50),
+              PricePoint(date: DateTime.utc(2026, 8, 3), close: 55),
+            ],
+          },
+        ),
+      };
+
+      List<PricePoint> seriesFor(String? selectedId) {
+        return PortfolioMath.performanceSeries(
+          holdings: PortfolioMath.holdingsForChart(
+            visible: [aapl, vwce],
+            selectedHoldingId: selectedId,
+          ),
+          quotes: quotes,
+          mainCurrency: 'USD',
+          rates: rates,
+          range: QuoteHistoryRange.oneMonth,
+        );
+      }
+
+      final portfolio = seriesFor(null);
+      final appleOnly = seriesFor(aapl.id);
+      expect(portfolio, hasLength(3));
+      expect(appleOnly, hasLength(2));
+      expect(appleOnly.first.close, closeTo(200, 0.01));
+      expect(appleOnly.last.close, closeTo(220, 0.01));
+      expect(appleOnly.last.close, isNot(closeTo(portfolio.last.close, 0.01)));
+    });
   });
 }

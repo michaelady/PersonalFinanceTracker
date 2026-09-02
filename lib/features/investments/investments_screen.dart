@@ -43,6 +43,8 @@ class InvestmentsScreen extends StatefulWidget {
 class _InvestmentsScreenState extends State<InvestmentsScreen> {
   QuoteHistoryRange _range = QuoteHistoryRange.oneMonth;
   String? _chartHoldingId;
+  final _scrollController = ScrollController();
+  final _chartKey = GlobalKey();
 
   @override
   void initState() {
@@ -53,9 +55,37 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
     });
   }
 
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   Future<void> _onRange(QuoteHistoryRange range) async {
     setState(() => _range = range);
     await context.read<FinanceRepository>().refreshQuotes(range: range);
+  }
+
+  void _setChartHolding(String? id) {
+    setState(() => _chartHoldingId = id);
+  }
+
+  void _toggleChartHolding(String id) {
+    _setChartHolding(_chartHoldingId == id ? null : id);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _chartKey.currentContext;
+      if (ctx == null || !ctx.mounted) return;
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+        alignment: 0.05,
+      );
+    });
+  }
+
+  void _editHolding(FinanceRepository repo, InvestmentHolding holding) {
+    InvestmentsScreen.showEditor(context, repo, existing: holding);
   }
 
   @override
@@ -64,11 +94,15 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
     final portfolio = repo.portfolio;
     final currency = repo.settings.mainCurrency;
     final holdings = portfolio.holdings;
+    final chartHoldingId = holdings.any((v) => v.holding.id == _chartHoldingId)
+        ? _chartHoldingId
+        : null;
 
     return AppScaffoldBody(
       child: RefreshIndicator(
         onRefresh: () => repo.refreshQuotes(force: true, range: _range),
         child: ListView(
+          controller: _scrollController,
           children: [
             Text(
               'Investments',
@@ -94,12 +128,15 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
             else ...[
               _TotalsCard(portfolio: portfolio, currency: currency, repo: repo),
               const SizedBox(height: 20),
-              _ChartBlock(
-                repo: repo,
-                range: _range,
-                chartHoldingId: _chartHoldingId,
-                onRange: _onRange,
-                onSelectHolding: (id) => setState(() => _chartHoldingId = id),
+              KeyedSubtree(
+                key: _chartKey,
+                child: _ChartBlock(
+                  repo: repo,
+                  range: _range,
+                  chartHoldingId: chartHoldingId,
+                  onRange: _onRange,
+                  onSelectHolding: _setChartHolding,
+                ),
               ),
               const SizedBox(height: 24),
               Text(
@@ -108,7 +145,12 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
               ),
               const SizedBox(height: 8),
               ...holdings.map(
-                (v) => _AllocationRow(valuation: v, currency: currency),
+                (v) => _AllocationRow(
+                  valuation: v,
+                  currency: currency,
+                  selected: chartHoldingId == v.holding.id,
+                  onTap: () => _toggleChartHolding(v.holding.id),
+                ),
               ),
               const SizedBox(height: 24),
               Text(
@@ -120,11 +162,9 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
                 (v) => _HoldingTile(
                   valuation: v,
                   currency: currency,
-                  onTap: () => InvestmentsScreen.showEditor(
-                    context,
-                    repo,
-                    existing: v.holding,
-                  ),
+                  selected: chartHoldingId == v.holding.id,
+                  onTap: () => _toggleChartHolding(v.holding.id),
+                  onEdit: () => _editHolding(repo, v.holding),
                 ),
               ),
             ],
@@ -319,25 +359,54 @@ class _ChartBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final selected = chartHoldingId == null
-        ? repo.visibleHoldings
-        : repo.visibleHoldings.where((h) => h.id == chartHoldingId).toList();
+    final currency = repo.settings.mainCurrency;
+    final selected = PortfolioMath.holdingsForChart(
+      visible: repo.visibleHoldings,
+      selectedHoldingId: chartHoldingId,
+    );
+    final selectedHolding = selected.length == 1 ? selected.single : null;
     final series = PortfolioMath.performanceSeries(
       holdings: selected,
       quotes: repo.quotes,
-      mainCurrency: repo.settings.mainCurrency,
+      mainCurrency: currency,
       rates: repo.rates,
       range: range,
     );
+    final subtitle = selectedHolding == null
+        ? 'Whole portfolio market value'
+        : selectedHolding.displayName.isEmpty
+            ? selectedHolding.ticker
+            : '${selectedHolding.displayName} · ${selectedHolding.ticker}';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Text('Performance', style: Theme.of(context).textTheme.titleLarge),
-            const Spacer(),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Performance',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  Text(
+                    subtitle,
+                    key: const Key('chart-subtitle'),
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
+            if (chartHoldingId != null)
+              TextButton(
+                key: const Key('chart-show-portfolio'),
+                onPressed: () => onSelectHolding(null),
+                child: const Text('Portfolio'),
+              ),
             DropdownButton<String?>(
+              key: const Key('chart-holding-dropdown'),
               // ignore: deprecated_member_use
               value: chartHoldingId,
               underline: const SizedBox.shrink(),
@@ -362,90 +431,235 @@ class _ChartBlock extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         if (series.length < 2)
-          Text(
-            'No history yet for this range. Pull to refresh when online.',
-            style: Theme.of(context).textTheme.bodyMedium,
+          Container(
+            key: const Key('performance-empty'),
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              border: Border.all(color: ZenthoColors.line),
+              borderRadius: BorderRadius.circular(16),
+              color: Colors.white.withValues(alpha: 0.45),
+            ),
+            child: Text(
+              'No history yet for this range. Pull to refresh when online.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
           )
         else
-          SizedBox(
-            height: 180,
-            child: LineChart(
-              LineChartData(
-                minY: series.map((p) => p.close).reduce((a, b) => a < b ? a : b) *
-                    0.98,
-                gridData: const FlGridData(show: false),
-                borderData: FlBorderData(show: false),
-                titlesData: const FlTitlesData(
-                  leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  rightTitles:
-                      AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  bottomTitles:
-                      AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          _PerformanceChart(series: series, currency: currency),
+      ],
+    );
+  }
+}
+
+class _PerformanceChart extends StatelessWidget {
+  const _PerformanceChart({required this.series, required this.currency});
+
+  final List<PricePoint> series;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final last = series.last;
+    final minClose =
+        series.map((p) => p.close).reduce((a, b) => a < b ? a : b);
+    final maxClose =
+        series.map((p) => p.close).reduce((a, b) => a > b ? a : b);
+    final span = (maxClose - minClose).abs();
+    final pad = span < 1 ? 1.0 : span * 0.08;
+    final dateFormat = DateFormat.MMMd();
+    final moneyFormat = NumberFormat.currency(name: currency, symbol: '');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            MoneyText(
+              last.close,
+              key: const Key('chart-latest'),
+              currencyCode: currency,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              dateFormat.format(last.date.toLocal()),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: ZenthoColors.inkMuted,
+                  ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          key: const Key('performance-chart'),
+          height: 220,
+          padding: const EdgeInsets.fromLTRB(8, 12, 12, 8),
+          decoration: BoxDecoration(
+            border: Border.all(color: ZenthoColors.line),
+            borderRadius: BorderRadius.circular(16),
+            color: Colors.white.withValues(alpha: 0.45),
+          ),
+          child: LineChart(
+            LineChartData(
+              minY: minClose - pad,
+              maxY: maxClose + pad,
+              gridData: FlGridData(
+                show: true,
+                drawVerticalLine: false,
+                getDrawingHorizontalLine: (_) => FlLine(
+                  color: ZenthoColors.line.withValues(alpha: 0.7),
+                  strokeWidth: 1,
                 ),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: [
-                      for (var i = 0; i < series.length; i++)
-                        FlSpot(i.toDouble(), series[i].close),
-                    ],
-                    isCurved: true,
-                    color: ZenthoColors.tealDeep,
-                    barWidth: 2.4,
-                    dotData: const FlDotData(show: false),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      color: ZenthoColors.tealSoft.withValues(alpha: 0.18),
+              ),
+              borderData: FlBorderData(show: false),
+              titlesData: FlTitlesData(
+                topTitles: const AxisTitles(
+                  sideTitles: SideTitles(showTitles: false),
+                ),
+                rightTitles: const AxisTitles(
+                  sideTitles: SideTitles(showTitles: false),
+                ),
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 48,
+                    getTitlesWidget: (value, _) => Text(
+                      NumberFormat.compact().format(value),
+                      style: Theme.of(context).textTheme.labelSmall,
                     ),
                   ),
-                ],
+                ),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 28,
+                    interval:
+                        (series.length / 3).clamp(1, series.length).toDouble(),
+                    getTitlesWidget: (value, meta) {
+                      final i = value.round();
+                      if (i < 0 || i >= series.length) {
+                        return const SizedBox.shrink();
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          dateFormat.format(series[i].date.toLocal()),
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                      );
+                    },
+                  ),
+                ),
               ),
+              lineTouchData: LineTouchData(
+                handleBuiltInTouches: true,
+                touchTooltipData: LineTouchTooltipData(
+                  getTooltipItems: (spots) => [
+                    for (final s in spots)
+                      if (s.spotIndex >= 0 && s.spotIndex < series.length)
+                        LineTooltipItem(
+                          '$currency ${moneyFormat.format(s.y).trim()}\n'
+                          '${dateFormat.format(series[s.spotIndex].date.toLocal())}',
+                          const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                  ],
+                ),
+              ),
+              lineBarsData: [
+                LineChartBarData(
+                  spots: [
+                    for (var i = 0; i < series.length; i++)
+                      FlSpot(i.toDouble(), series[i].close),
+                  ],
+                  isCurved: true,
+                  color: ZenthoColors.tealDeep,
+                  barWidth: 2.4,
+                  dotData: const FlDotData(show: false),
+                  belowBarData: BarAreaData(
+                    show: true,
+                    color: ZenthoColors.tealSoft.withValues(alpha: 0.18),
+                  ),
+                ),
+              ],
             ),
           ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Touch the line for value and date.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: ZenthoColors.inkMuted,
+              ),
+        ),
       ],
     );
   }
 }
 
 class _AllocationRow extends StatelessWidget {
-  const _AllocationRow({required this.valuation, required this.currency});
+  const _AllocationRow({
+    required this.valuation,
+    required this.currency,
+    required this.selected,
+    required this.onTap,
+  });
 
   final HoldingValuation valuation;
   final String currency;
+  final bool selected;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final pct = valuation.allocationPercent.clamp(0, 100) / 100;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${valuation.holding.ticker} · ${valuation.allocationPercent.toStringAsFixed(0)}%',
-                  style: Theme.of(context).textTheme.titleSmall,
+    return InkWell(
+      key: ValueKey('allocation-${valuation.holding.id}'),
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? ZenthoColors.mint.withValues(alpha: 0.7)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? ZenthoColors.tealDeep : Colors.transparent,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${valuation.holding.ticker} · ${valuation.allocationPercent.toStringAsFixed(0)}%',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
                 ),
-              ),
-              MoneyText(
-                valuation.valueForNetWorthMain,
-                currencyCode: currency,
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(
-              value: pct.toDouble(),
-              minHeight: 8,
-              backgroundColor: ZenthoColors.line,
-              color: ZenthoColors.tealDeep,
+                MoneyText(
+                  valuation.valueForNetWorthMain,
+                  currencyCode: currency,
+                ),
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: pct.toDouble(),
+                minHeight: 8,
+                backgroundColor: ZenthoColors.line,
+                color: ZenthoColors.tealDeep,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -455,12 +669,16 @@ class _HoldingTile extends StatelessWidget {
   const _HoldingTile({
     required this.valuation,
     required this.currency,
+    required this.selected,
     required this.onTap,
+    required this.onEdit,
   });
 
   final HoldingValuation valuation;
   final String currency;
+  final bool selected;
   final VoidCallback onTap;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -469,10 +687,22 @@ class _HoldingTile extends StatelessWidget {
         ? 'No quote yet'
         : '${valuation.quoteCurrency} ${valuation.lastPrice!.toStringAsFixed(2)}';
     return InkWell(
+      key: ValueKey('holding-${h.id}'),
       borderRadius: BorderRadius.circular(12),
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+      onLongPress: onEdit,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? ZenthoColors.mint.withValues(alpha: 0.7)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? ZenthoColors.tealDeep : Colors.transparent,
+          ),
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -530,6 +760,13 @@ class _HoldingTile extends StatelessWidget {
                         ),
                   ),
               ],
+            ),
+            IconButton(
+              key: ValueKey('edit-holding-${h.id}'),
+              tooltip: 'Edit holding',
+              visualDensity: VisualDensity.compact,
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined),
             ),
           ],
         ),

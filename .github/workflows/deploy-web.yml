@@ -39,7 +39,9 @@ jobs:
         run: flutter test
 
       - name: Build web
-        run: flutter build web --release --base-href "/PersonalFinanceTracker/"
+        # Optional repo secret FINNHUB_API_KEY is baked in at compile time.
+        # A missing secret interpolates empty and the job still succeeds.
+        run: flutter build web --release --base-href "/PersonalFinanceTracker/" --dart-define=FINNHUB_API_KEY=${{ secrets.FINNHUB_API_KEY }}
 
       - name: Add .nojekyll
         run: touch build/web/.nojekyll

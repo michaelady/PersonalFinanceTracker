@@ -196,7 +196,41 @@ class YahooQuoteClient implements QuoteClient {
   }
 }
 
-/// Finnhub quote + candle. Requires a **user-provided** free token (local only).
+/// Compile-time Finnhub key from `--dart-define=FINNHUB_API_KEY=...`.
+/// Empty when the define is omitted. Never commit a real key.
+const bakedFinnhubApiKey = String.fromEnvironment(
+  'FINNHUB_API_KEY',
+  defaultValue: '',
+);
+
+/// User-saved token wins; otherwise the compile-time baked key.
+String? resolveFinnhubToken({
+  String? userToken,
+  String bakedToken = bakedFinnhubApiKey,
+}) {
+  final user = userToken?.trim();
+  if (user != null && user.isNotEmpty) return user;
+  final baked = bakedToken.trim();
+  if (baked.isNotEmpty) return baked;
+  return null;
+}
+
+/// Builds a Finnhub client only when a non-empty token is available.
+FinnhubQuoteClient? createFinnhubQuoteClient({
+  String? userToken,
+  String bakedToken = bakedFinnhubApiKey,
+  http.Client? client,
+}) {
+  final token = resolveFinnhubToken(
+    userToken: userToken,
+    bakedToken: bakedToken,
+  );
+  if (token == null) return null;
+  return FinnhubQuoteClient(token: token, client: client);
+}
+
+/// Finnhub quote + candle. Token is user-provided (local only) or a
+/// compile-time `--dart-define=FINNHUB_API_KEY` baked into a release build.
 class FinnhubQuoteClient implements QuoteClient {
   FinnhubQuoteClient({
     required this.token,
@@ -348,12 +382,29 @@ class FinnhubQuoteClient implements QuoteClient {
 }
 
 /// Try Yahoo first (native Android/Windows). On failure, Finnhub if a token
-/// was provided. Never uses a CORS proxy.
+/// is available (user-saved, or compile-time baked key). Never uses a CORS proxy.
 class CompositeQuoteClient implements QuoteClient {
   CompositeQuoteClient({
     required this.yahoo,
     this.finnhub,
   });
+
+  /// Yahoo plus optional Finnhub. User-saved token overrides [bakedToken].
+  factory CompositeQuoteClient.fromTokens({
+    required QuoteClient yahoo,
+    String? userToken,
+    String bakedToken = bakedFinnhubApiKey,
+    http.Client? httpClient,
+  }) {
+    return CompositeQuoteClient(
+      yahoo: yahoo,
+      finnhub: createFinnhubQuoteClient(
+        userToken: userToken,
+        bakedToken: bakedToken,
+        client: httpClient,
+      ),
+    );
+  }
 
   final QuoteClient yahoo;
   final QuoteClient? finnhub;

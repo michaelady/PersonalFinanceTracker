@@ -148,8 +148,8 @@ class SettingsScreen extends StatelessWidget {
                 title: const Text('Finnhub API token (optional)'),
                 subtitle: Text(
                     repo.finnhubToken != null && repo.finnhubToken!.isNotEmpty
-                        ? 'Saved on this device only — used when Yahoo is blocked (web)'
-                        : 'Get a free key at finnhub.io. Android/Windows do not need one.',
+                        ? 'Saved on this device only — overrides the website default when Yahoo is blocked'
+                        : 'The website may already have a default key; a personal key still overrides it.',
                 ),
                 trailing: const Icon(Icons.edit_outlined),
                 onTap: () => _editFinnhubToken(context, repo),
@@ -216,7 +216,7 @@ class SettingsScreen extends StatelessWidget {
               const SizedBox(height: 24),
               Text(
                 'Offline-first · share household by invite link · '
-                'quotes from Yahoo Finance (Finnhub optional on web)',
+                'quotes from Yahoo Finance (Finnhub fallback on web)',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ],
@@ -351,8 +351,9 @@ class SettingsScreen extends StatelessWidget {
           children: [
             const Text(
               'Optional. Stored only on this device — never synced or exported. '
-              'Get a free key at finnhub.io. Leave blank to skip Finnhub '
-              '(Android and Windows use Yahoo Finance directly).',
+              'The website may already have a default key; a personal key still '
+              'overrides it. Get a free key at finnhub.io. Leave blank to use '
+              'the default (if any). Android and Windows use Yahoo Finance directly.',
             ),
             const SizedBox(height: 12),
             TextField(

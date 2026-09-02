@@ -163,4 +163,89 @@ void main() {
       throwsA(isA<http.ClientException>()),
     );
   });
+
+  test('empty baked key does not construct a Finnhub client', () {
+    expect(
+      createFinnhubQuoteClient(userToken: null, bakedToken: ''),
+      isNull,
+    );
+    expect(
+      createFinnhubQuoteClient(userToken: '  ', bakedToken: '   '),
+      isNull,
+    );
+    final composite = CompositeQuoteClient.fromTokens(
+      yahoo: YahooQuoteClient(),
+      userToken: null,
+      bakedToken: '',
+    );
+    expect(composite.finnhub, isNull);
+  });
+
+  test('baked key constructs Finnhub fallback when user has no token', () {
+    final client = createFinnhubQuoteClient(
+      userToken: null,
+      bakedToken: 'baked-test-key',
+    );
+    expect(client, isA<FinnhubQuoteClient>());
+    expect(client!.token, 'baked-test-key');
+
+    final composite = CompositeQuoteClient.fromTokens(
+      yahoo: YahooQuoteClient(),
+      userToken: null,
+      bakedToken: 'baked-test-key',
+    );
+    expect(composite.finnhub, isA<FinnhubQuoteClient>());
+    expect((composite.finnhub! as FinnhubQuoteClient).token, 'baked-test-key');
+  });
+
+  test('user-saved token overrides baked Finnhub key', () {
+    final client = createFinnhubQuoteClient(
+      userToken: '  user-test-key  ',
+      bakedToken: 'baked-test-key',
+    );
+    expect(client, isA<FinnhubQuoteClient>());
+    expect(client!.token, 'user-test-key');
+
+    final emptyUserFallsBack = createFinnhubQuoteClient(
+      userToken: '',
+      bakedToken: 'baked-test-key',
+    );
+    expect(emptyUserFallsBack!.token, 'baked-test-key');
+  });
+
+  test('baked Finnhub key is used after Yahoo failure', () async {
+    final client = MockClient((request) async {
+      if (request.url.host.contains('yahoo')) {
+        throw http.ClientException('Failed to fetch', request.url);
+      }
+      if (request.url.path.contains('/quote')) {
+        expect(request.url.queryParameters['token'], 'baked-test-key');
+        return http.Response(
+          jsonEncode({'c': 325.13, 'dp': 1.25, 'pc': 321.12}),
+          200,
+        );
+      }
+      if (request.url.path.contains('/candle')) {
+        return http.Response(
+          jsonEncode({
+            's': 'ok',
+            'c': [325.13],
+            't': [1725235200],
+          }),
+          200,
+        );
+      }
+      fail('Unexpected ${request.url}');
+    });
+
+    final composite = CompositeQuoteClient.fromTokens(
+      yahoo: YahooQuoteClient(client: client),
+      userToken: null,
+      bakedToken: 'baked-test-key',
+      httpClient: client,
+    );
+    final bundle = await composite.fetchChart('AAPL');
+    expect(bundle.quote.source, 'finnhub');
+    expect(bundle.quote.price, closeTo(325.13, 0.0001));
+  });
 }

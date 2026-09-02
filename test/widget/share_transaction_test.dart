@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zentho/data/repositories/finance_repository.dart';
 import 'package:zentho/data/services/quote_client.dart';
 import 'package:zentho/domain/models/models.dart';
+import 'package:zentho/domain/services/portfolio_math.dart';
 import 'package:zentho/features/investments/investments_screen.dart';
 
 class _NoNetworkQuoteClient implements QuoteClient {

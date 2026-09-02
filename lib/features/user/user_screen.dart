@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../branding/zentho_logo.dart';
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
 import '../../domain/services/household_invite.dart';

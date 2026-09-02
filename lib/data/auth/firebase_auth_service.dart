@@ -71,12 +71,12 @@ class FirebaseAuthService implements AuthService {
       if (idToken == null || idToken.isEmpty) {
         throw StateError('Google sign-in did not return an ID token');
       }
-      return _auth.signInWithCredential(
+      return await _auth.signInWithCredential(
         GoogleAuthProvider.credential(idToken: idToken),
       );
     } catch (_) {
       // Windows (and any host without the plugin) uses Firebase's provider flow.
-      return _auth.signInWithProvider(provider);
+      return await _auth.signInWithProvider(provider);
     }
   }
 

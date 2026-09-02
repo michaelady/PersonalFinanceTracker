@@ -42,6 +42,8 @@ class CsvFullImportResult {
 /// ...
 /// [goals]
 /// ...
+/// [holdings]
+/// ...
 /// [rates]
 /// ...
 /// [ledger]          # export-only, denormalized for spreadsheet debugging
@@ -57,6 +59,7 @@ abstract final class CsvDataExchange {
     'transactions',
     'budgets',
     'goals',
+    'holdings',
     'rates',
   };
 
@@ -264,6 +267,39 @@ abstract final class CsvDataExchange {
     );
 
     writeSection(
+      'holdings',
+      const [
+        'id',
+        'ticker',
+        'displayName',
+        'shares',
+        'averageCostPerShare',
+        'currencyCode',
+        'ownerProfileId',
+        'visibility',
+        'accountId',
+        'notes',
+        'includeInNetWorth',
+      ],
+      [
+        for (final h in snapshot.holdings)
+          [
+            h.id,
+            h.ticker,
+            h.displayName,
+            h.shares,
+            h.averageCostPerShare,
+            h.currencyCode,
+            h.ownerProfileId,
+            h.visibility.name,
+            h.accountId ?? '',
+            h.notes,
+            h.includeInNetWorth,
+          ],
+      ],
+    );
+
+    writeSection(
       'rates',
       const ['code', 'rateToMain', 'updatedAt'],
       [
@@ -404,6 +440,10 @@ abstract final class CsvDataExchange {
     final goals = [
       for (final row in _rowsOf(sections['goals'] ?? const [])) _parseGoal(row),
     ];
+    final holdings = [
+      for (final row in _rowsOf(sections['holdings'] ?? const []))
+        _parseHolding(row),
+    ];
     final rates = [
       for (final row in _rowsOf(sections['rates'] ?? const [])) _parseRate(row),
     ];
@@ -421,6 +461,7 @@ abstract final class CsvDataExchange {
         transactions: transactions,
         budgets: budgets,
         goals: goals,
+        holdings: holdings,
         rates: rates,
       ),
       warnings: warnings,
@@ -694,6 +735,26 @@ abstract final class CsvDataExchange {
           (targetDate == null || targetDate.isEmpty)
               ? null
               : DateTime.parse(targetDate),
+    );
+  }
+
+  static InvestmentHolding _parseHolding(Map<String, String> row) {
+    final accountId = row['accountId']?.trim();
+    return InvestmentHolding(
+      id: _req(row, 'id'),
+      ticker: _req(row, 'ticker').toUpperCase(),
+      displayName: row['displayName']?.trim().isNotEmpty == true
+          ? row['displayName']!.trim()
+          : _req(row, 'ticker'),
+      shares: _double(row['shares']),
+      averageCostPerShare: _double(row['averageCostPerShare']),
+      currencyCode: _req(row, 'currencyCode').toUpperCase(),
+      ownerProfileId: _req(row, 'ownerProfileId'),
+      visibility:
+          VisibilityScope.values.byName(_req(row, 'visibility').toLowerCase()),
+      accountId: (accountId == null || accountId.isEmpty) ? null : accountId,
+      notes: row['notes']?.trim() ?? '',
+      includeInNetWorth: _bool(row['includeInNetWorth'], fallback: true),
     );
   }
 

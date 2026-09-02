@@ -8,27 +8,34 @@ import '../../domain/services/csv_data_exchange.dart';
 import '../../domain/services/csv_import_service.dart';
 import '../../domain/services/household_invite.dart';
 import '../../domain/services/money_math.dart';
+import '../../domain/services/portfolio_math.dart';
 import '../../domain/services/recurrence_period.dart';
 import '../../domain/services/supported_currencies.dart';
 import '../persistence/local_store.dart';
 import '../services/fx_rate_service.dart';
 import '../services/household_cloud_store.dart';
+import '../services/quote_client.dart';
 
 class FinanceRepository extends ChangeNotifier {
   FinanceRepository({
     LocalStore? store,
     FxRateService? fxService,
     HouseholdCloudStore? householdCloud,
+    QuoteClient? quoteClient,
     this.refreshRatesOnInit = true,
   })  : _store = store ?? LocalStore(),
         _fx = fxService ?? FxRateService(),
-        _householdCloud = householdCloud ?? JsonBlobHouseholdCloudStore();
+        _householdCloud = householdCloud ?? JsonBlobHouseholdCloudStore(),
+        _injectedQuoteClient = quoteClient;
 
   final LocalStore _store;
   final FxRateService _fx;
   final HouseholdCloudStore _householdCloud;
+  final QuoteClient? _injectedQuoteClient;
   final bool refreshRatesOnInit;
   final _uuid = const Uuid();
+  static const _quotePause = Duration(milliseconds: 280);
+  YahooQuoteClient? _yahooClient;
 
   bool loading = true;
   String? error;
@@ -51,6 +58,14 @@ class FinanceRepository extends ChangeNotifier {
   List<BudgetCategory> budgets = [];
   List<SavingsGoal> goals = [];
   List<CurrencyRate> rates = [];
+  List<InvestmentHolding> holdings = [];
+  Map<String, CachedQuote> quotes = {};
+  String? finnhubToken;
+
+  bool quotesRefreshing = false;
+  String? quotesError;
+  String? quotesSource;
+  DateTime? quotesUpdatedAt;
 
   Future<void> init() async {
     loading = true;
@@ -64,6 +79,8 @@ class FinanceRepository extends ChangeNotifier {
         _hydrate(existing);
       }
       _ensureSupportedCurrencies();
+      quotes = await _store.loadQuotes();
+      finnhubToken = await _store.loadFinnhubToken();
     } catch (e) {
       error = e.toString();
       _seedEmpty();
@@ -79,6 +96,9 @@ class FinanceRepository extends ChangeNotifier {
     if (settings.householdSharingEnabled) {
       await syncHousehold(pullOnly: true);
     }
+    if (refreshRatesOnInit && holdings.isNotEmpty) {
+      await refreshQuotes();
+    }
   }
 
   void _hydrate(FinanceSnapshot snapshot) {
@@ -91,6 +111,7 @@ class FinanceRepository extends ChangeNotifier {
     budgets = [...snapshot.budgets];
     goals = [...snapshot.goals];
     rates = [...snapshot.rates];
+    holdings = [...snapshot.holdings];
   }
 
   void _seedEmpty() {
@@ -110,6 +131,7 @@ class FinanceRepository extends ChangeNotifier {
     transactions = [];
     budgets = [];
     goals = [];
+    holdings = [];
   }
 
   void _ensureSupportedCurrencies() {
@@ -243,7 +265,21 @@ class FinanceRepository extends ChangeNotifier {
         budgets: budgets,
         goals: goals,
         rates: rates,
+        holdings: holdings,
       );
+
+  QuoteClient get _quoteClient {
+    final injected = _injectedQuoteClient;
+    if (injected != null) return injected;
+    final yahoo = _yahooClient ??= YahooQuoteClient();
+    final token = finnhubToken?.trim();
+    return CompositeQuoteClient(
+      yahoo: yahoo,
+      finnhub: (token == null || token.isEmpty)
+          ? null
+          : FinnhubQuoteClient(token: token),
+    );
+  }
 
   Future<void> _persist() async {
     await _store.save(snapshot);
@@ -445,6 +481,11 @@ class FinanceRepository extends ChangeNotifier {
     _seedEmpty();
     householdSyncError = null;
     householdSyncMessage = null;
+    quotes = {};
+    finnhubToken = null;
+    quotesError = null;
+    quotesSource = null;
+    quotesUpdatedAt = null;
     await _store.save(snapshot);
     notifyListeners();
   }
@@ -589,6 +630,7 @@ class FinanceRepository extends ChangeNotifier {
           budgets: remoteSnapshot.budgets,
           goals: remoteSnapshot.goals,
           rates: remoteSnapshot.rates,
+          holdings: remoteSnapshot.holdings,
         ),
       );
       _ensureSupportedCurrencies();
@@ -656,6 +698,7 @@ class FinanceRepository extends ChangeNotifier {
                 budgets: remote.snapshot.budgets,
                 goals: remote.snapshot.goals,
                 rates: remote.snapshot.rates,
+                holdings: remote.snapshot.holdings,
               ),
             );
             _ensureSupportedCurrencies();
@@ -829,6 +872,125 @@ class FinanceRepository extends ChangeNotifier {
     await _persist();
   }
 
+  Future<void> addHolding(InvestmentHolding holding) async {
+    holdings = [...holdings, holding];
+    _ensureRateFor(holding.currencyCode);
+    await _persist();
+    await refreshQuotes(symbols: [holding.ticker], force: true);
+  }
+
+  Future<void> updateHolding(InvestmentHolding holding) async {
+    holdings = [
+      for (final h in holdings)
+        if (h.id == holding.id) holding else h,
+    ];
+    _ensureRateFor(holding.currencyCode);
+    await _persist();
+    await refreshQuotes(symbols: [holding.ticker]);
+  }
+
+  Future<void> deleteHolding(String id) async {
+    holdings = holdings.where((h) => h.id != id).toList();
+    await _persist();
+  }
+
+  Future<void> setFinnhubToken(String? token) async {
+    final trimmed = token?.trim();
+    finnhubToken = (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+    await _store.saveFinnhubToken(finnhubToken);
+    notifyListeners();
+    if (holdings.isNotEmpty) {
+      await refreshQuotes(force: true);
+    }
+  }
+
+  Future<List<TickerSearchResult>> searchTickers(String query) async {
+    try {
+      return await _quoteClient.search(query);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> refreshQuotes({
+    Iterable<String>? symbols,
+    QuoteHistoryRange range = QuoteHistoryRange.oneMonth,
+    bool force = false,
+  }) async {
+    final tickers = (symbols ?? holdings.map((h) => h.ticker))
+        .map((s) => s.trim().toUpperCase())
+        .where((s) => s.isNotEmpty)
+        .toSet()
+        .toList();
+    if (tickers.isEmpty) return;
+
+    quotesRefreshing = true;
+    quotesError = null;
+    notifyListeners();
+
+    var fetched = 0;
+    String? lastSource;
+    final failures = <String>[];
+    try {
+      for (var i = 0; i < tickers.length; i++) {
+        final ticker = tickers[i];
+        final cached = quotes[ticker];
+        final historyFresh = cached != null &&
+            cached.historyFetchedAt[range.key] != null &&
+            PortfolioMath.quoteIsFresh(cached.historyFetchedAt[range.key]!);
+        final quoteFresh =
+            cached != null && PortfolioMath.quoteIsFresh(cached.fetchedAt);
+        if (!force && quoteFresh && historyFresh) {
+          lastSource = cached.source;
+          continue;
+        }
+        try {
+          final bundle =
+              await _quoteClient.fetchChart(ticker, range: range);
+          quotes = {
+            ...quotes,
+            ticker: _mergeQuote(cached, bundle),
+          };
+          _ensureRateFor(bundle.quote.currency);
+          lastSource = bundle.quote.source;
+          fetched++;
+        } catch (e) {
+          failures.add(ticker);
+          if (cached == null) {
+            quotesError ??= e.toString();
+          }
+        }
+        if (i != tickers.length - 1) {
+          await Future<void>.delayed(_quotePause);
+        }
+      }
+      if (fetched > 0) {
+        quotesUpdatedAt = DateTime.now().toUtc();
+        quotesSource = lastSource;
+        if (failures.isEmpty) quotesError = null;
+        await _store.saveQuotes(quotes);
+      } else if (failures.isNotEmpty && quotes.values.isNotEmpty) {
+        quotesError =
+            'Could not refresh quotes — showing last saved prices.';
+      } else if (failures.isNotEmpty) {
+        quotesError = finnhubToken == null || finnhubToken!.isEmpty
+            ? 'Quotes unavailable. On the website, add a free Finnhub token in Settings.'
+            : 'Could not refresh quotes.';
+      }
+    } finally {
+      quotesRefreshing = false;
+      notifyListeners();
+    }
+  }
+
+  CachedQuote _mergeQuote(CachedQuote? previous, QuoteBundle bundle) {
+    final next = bundle.quote;
+    if (previous == null) return next;
+    final history = {...previous.history, ...next.history};
+    final fetched = {...previous.historyFetchedAt, ...next.historyFetchedAt};
+    return next.copyWith(history: history, historyFetchedAt: fetched);
+  }
+
   CsvFullExportResult exportFullCsv({DateTime? exportedAt}) {
     return CsvDataExchange.exportSnapshot(
       snapshot,
@@ -907,12 +1069,35 @@ class FinanceRepository extends ChangeNotifier {
         showPrivate: settings.showPrivate,
       ).toList();
 
-  double get netWorth => MoneyMath.netWorthMain(
+  List<InvestmentHolding> get visibleHoldings => MoneyMath.filterVisible(
+        items: holdings,
+        visibilityOf: (h) => h.visibility,
+        ownerOf: (h) => h.ownerProfileId,
+        activeProfileId: settings.activeProfileId,
+        showShared: settings.showShared,
+        showPrivate: settings.showPrivate,
+      ).toList();
+
+  PortfolioTotals get portfolio => PortfolioMath.summarize(
+        holdings: visibleHoldings,
+        quotes: quotes,
+        mainCurrency: settings.mainCurrency,
+        rates: rates,
+      );
+
+  double get netWorth =>
+      MoneyMath.netWorthMain(
         accounts: visibleAccounts,
         transactions: visibleTransactions,
         mainCurrency: settings.mainCurrency,
         rates: rates,
         asOf: DateTime.now(),
+      ) +
+      PortfolioMath.includedMarketValueMain(
+        holdings: visibleHoldings,
+        quotes: quotes,
+        mainCurrency: settings.mainCurrency,
+        rates: rates,
       );
 
   double availableToSpend([DateTime? date]) {

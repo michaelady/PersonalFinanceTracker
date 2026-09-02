@@ -93,28 +93,11 @@ class DashboardScreen extends StatelessWidget {
             ...recent.map((tx) => _TxRow(tx: tx, repo: repo)),
           const SizedBox(height: 20),
           Text(
-            'Investments preview',
+            'Investments',
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              border: Border.all(color: ZenthoColors.line),
-              borderRadius: BorderRadius.circular(18),
-              gradient: LinearGradient(
-                colors: [
-                  Colors.white.withValues(alpha: 0.7),
-                  ZenthoColors.mint.withValues(alpha: 0.55),
-                ],
-              ),
-            ),
-            child: Text(
-              'Portfolio tracking is next — holdings, allocation, and performance will live here without changing your budgeting flow.',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ),
+          _InvestmentsPreview(repo: repo, currency: currency),
         ],
       ),
     );
@@ -307,4 +290,57 @@ class _TxRow extends StatelessWidget {
 
 extension on String {
   String ifEmpty(String fallback) => trim().isEmpty ? fallback : this;
+}
+
+class _InvestmentsPreview extends StatelessWidget {
+  const _InvestmentsPreview({required this.repo, required this.currency});
+
+  final FinanceRepository repo;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final portfolio = repo.portfolio;
+    final empty = repo.visibleHoldings.isEmpty;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        border: Border.all(color: ZenthoColors.line),
+        borderRadius: BorderRadius.circular(18),
+        gradient: LinearGradient(
+          colors: [
+            Colors.white.withValues(alpha: 0.7),
+            ZenthoColors.mint.withValues(alpha: 0.55),
+          ],
+        ),
+      ),
+      child: empty
+          ? Text(
+              'Add lots on the Invest tab. Market value (or last cached quote) '
+              'rolls into net worth above.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${repo.visibleHoldings.length} holding'
+                  '${repo.visibleHoldings.length == 1 ? '' : 's'}',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 6),
+                MoneyText(portfolio.marketMain, currencyCode: currency),
+                if (portfolio.unrealizedPlMain != null) ...[
+                  const SizedBox(height: 4),
+                  MoneyText(
+                    portfolio.unrealizedPlMain!,
+                    currencyCode: currency,
+                    signed: true,
+                  ),
+                ],
+              ],
+            ),
+    );
+  }
 }

@@ -614,6 +614,265 @@ class SavingsGoal extends Equatable {
       ];
 }
 
+class InvestmentHolding extends Equatable {
+  const InvestmentHolding({
+    required this.id,
+    required this.ticker,
+    required this.displayName,
+    required this.shares,
+    required this.averageCostPerShare,
+    required this.currencyCode,
+    required this.ownerProfileId,
+    required this.visibility,
+    this.accountId,
+    this.notes = '',
+    this.includeInNetWorth = true,
+  });
+
+  final String id;
+  final String ticker;
+  final String displayName;
+  final double shares;
+  final double averageCostPerShare;
+  final String currencyCode;
+  final String ownerProfileId;
+  final VisibilityScope visibility;
+  final String? accountId;
+  final String notes;
+  final bool includeInNetWorth;
+
+  factory InvestmentHolding.create({
+    required String ticker,
+    required String displayName,
+    required double shares,
+    required double averageCostPerShare,
+    required String currencyCode,
+    required String ownerProfileId,
+    required VisibilityScope visibility,
+    String? accountId,
+    String notes = '',
+    bool includeInNetWorth = true,
+  }) {
+    return InvestmentHolding(
+      id: _uuid.v4(),
+      ticker: ticker.trim().toUpperCase(),
+      displayName: displayName.trim(),
+      shares: shares,
+      averageCostPerShare: averageCostPerShare,
+      currencyCode: currencyCode.toUpperCase(),
+      ownerProfileId: ownerProfileId,
+      visibility: visibility,
+      accountId: accountId,
+      notes: notes,
+      includeInNetWorth: includeInNetWorth,
+    );
+  }
+
+  InvestmentHolding copyWith({
+    String? ticker,
+    String? displayName,
+    double? shares,
+    double? averageCostPerShare,
+    String? currencyCode,
+    VisibilityScope? visibility,
+    Object? accountId = _copyKeep,
+    String? notes,
+    bool? includeInNetWorth,
+  }) {
+    return InvestmentHolding(
+      id: id,
+      ticker: ticker ?? this.ticker,
+      displayName: displayName ?? this.displayName,
+      shares: shares ?? this.shares,
+      averageCostPerShare: averageCostPerShare ?? this.averageCostPerShare,
+      currencyCode: currencyCode ?? this.currencyCode,
+      ownerProfileId: ownerProfileId,
+      visibility: visibility ?? this.visibility,
+      accountId: identical(accountId, _copyKeep)
+          ? this.accountId
+          : accountId as String?,
+      notes: notes ?? this.notes,
+      includeInNetWorth: includeInNetWorth ?? this.includeInNetWorth,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'ticker': ticker,
+        'displayName': displayName,
+        'shares': shares,
+        'averageCostPerShare': averageCostPerShare,
+        'currencyCode': currencyCode,
+        'ownerProfileId': ownerProfileId,
+        'visibility': visibility.name,
+        'accountId': accountId,
+        'notes': notes,
+        'includeInNetWorth': includeInNetWorth,
+      };
+
+  factory InvestmentHolding.fromJson(Map<String, dynamic> json) {
+    return InvestmentHolding(
+      id: json['id'] as String,
+      ticker: (json['ticker'] as String).toUpperCase(),
+      displayName: json['displayName'] as String? ?? json['ticker'] as String,
+      shares: (json['shares'] as num).toDouble(),
+      averageCostPerShare: (json['averageCostPerShare'] as num).toDouble(),
+      currencyCode: json['currencyCode'] as String,
+      ownerProfileId: json['ownerProfileId'] as String,
+      visibility: VisibilityScope.values.byName(json['visibility'] as String),
+      accountId: json['accountId'] as String?,
+      notes: json['notes'] as String? ?? '',
+      includeInNetWorth: json['includeInNetWorth'] as bool? ?? true,
+    );
+  }
+
+  @override
+  List<Object?> get props => [
+        id,
+        ticker,
+        displayName,
+        shares,
+        averageCostPerShare,
+        currencyCode,
+        ownerProfileId,
+        visibility,
+        accountId,
+        notes,
+        includeInNetWorth,
+      ];
+}
+
+class PricePoint extends Equatable {
+  const PricePoint({required this.date, required this.close});
+
+  final DateTime date;
+  final double close;
+
+  Map<String, dynamic> toJson() => {
+        'date': date.toIso8601String(),
+        'close': close,
+      };
+
+  factory PricePoint.fromJson(Map<String, dynamic> json) {
+    return PricePoint(
+      date: DateTime.parse(json['date'] as String).toUtc(),
+      close: (json['close'] as num).toDouble(),
+    );
+  }
+
+  @override
+  List<Object?> get props => [date, close];
+}
+
+/// Last successful market quote, cached locally for offline / CORS-blocked use.
+class CachedQuote extends Equatable {
+  const CachedQuote({
+    required this.symbol,
+    required this.price,
+    required this.currency,
+    required this.fetchedAt,
+    required this.source,
+    this.changePercent,
+    this.previousClose,
+    this.history = const {},
+    this.historyFetchedAt = const {},
+  });
+
+  final String symbol;
+  final double price;
+  final String currency;
+  final DateTime fetchedAt;
+  final String source;
+  final double? changePercent;
+  final double? previousClose;
+
+  /// OHLCV closes keyed by Yahoo-style range (`1mo`, `3mo`, `1y`).
+  final Map<String, List<PricePoint>> history;
+  final Map<String, DateTime> historyFetchedAt;
+
+  CachedQuote copyWith({
+    double? price,
+    String? currency,
+    DateTime? fetchedAt,
+    String? source,
+    Object? changePercent = _copyKeep,
+    Object? previousClose = _copyKeep,
+    Map<String, List<PricePoint>>? history,
+    Map<String, DateTime>? historyFetchedAt,
+  }) {
+    return CachedQuote(
+      symbol: symbol,
+      price: price ?? this.price,
+      currency: currency ?? this.currency,
+      fetchedAt: fetchedAt ?? this.fetchedAt,
+      source: source ?? this.source,
+      changePercent: identical(changePercent, _copyKeep)
+          ? this.changePercent
+          : changePercent as double?,
+      previousClose: identical(previousClose, _copyKeep)
+          ? this.previousClose
+          : previousClose as double?,
+      history: history ?? this.history,
+      historyFetchedAt: historyFetchedAt ?? this.historyFetchedAt,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'symbol': symbol,
+        'price': price,
+        'currency': currency,
+        'fetchedAt': fetchedAt.toIso8601String(),
+        'source': source,
+        'changePercent': changePercent,
+        'previousClose': previousClose,
+        'history': {
+          for (final e in history.entries)
+            e.key: e.value.map((p) => p.toJson()).toList(),
+        },
+        'historyFetchedAt': {
+          for (final e in historyFetchedAt.entries)
+            e.key: e.value.toIso8601String(),
+        },
+      };
+
+  factory CachedQuote.fromJson(Map<String, dynamic> json) {
+    final rawHistory = json['history'] as Map<String, dynamic>? ?? const {};
+    final rawFetched = json['historyFetchedAt'] as Map<String, dynamic>? ?? const {};
+    return CachedQuote(
+      symbol: (json['symbol'] as String).toUpperCase(),
+      price: (json['price'] as num).toDouble(),
+      currency: json['currency'] as String? ?? 'USD',
+      fetchedAt: DateTime.parse(json['fetchedAt'] as String).toUtc(),
+      source: json['source'] as String? ?? 'cache',
+      changePercent: (json['changePercent'] as num?)?.toDouble(),
+      previousClose: (json['previousClose'] as num?)?.toDouble(),
+      history: {
+        for (final e in rawHistory.entries)
+          e.key: (e.value as List)
+              .map((p) => PricePoint.fromJson(p as Map<String, dynamic>))
+              .toList(),
+      },
+      historyFetchedAt: {
+        for (final e in rawFetched.entries)
+          e.key: DateTime.parse(e.value as String).toUtc(),
+      },
+    );
+  }
+
+  @override
+  List<Object?> get props => [
+        symbol,
+        price,
+        currency,
+        fetchedAt,
+        source,
+        changePercent,
+        previousClose,
+        history,
+        historyFetchedAt,
+      ];
+}
+
 class AppSettings extends Equatable {
   const AppSettings({
     required this.mainCurrency,
@@ -724,6 +983,7 @@ class FinanceSnapshot extends Equatable {
     required this.budgets,
     required this.goals,
     required this.rates,
+    this.holdings = const [],
   });
 
   final AppSettings settings;
@@ -734,6 +994,7 @@ class FinanceSnapshot extends Equatable {
   final List<BudgetCategory> budgets;
   final List<SavingsGoal> goals;
   final List<CurrencyRate> rates;
+  final List<InvestmentHolding> holdings;
 
   FinanceSnapshot copyWithSettings(AppSettings settings) {
     return FinanceSnapshot(
@@ -745,6 +1006,7 @@ class FinanceSnapshot extends Equatable {
       budgets: budgets,
       goals: goals,
       rates: rates,
+      holdings: holdings,
     );
   }
 
@@ -757,6 +1019,7 @@ class FinanceSnapshot extends Equatable {
         'budgets': budgets.map((e) => e.toJson()).toList(),
         'goals': goals.map((e) => e.toJson()).toList(),
         'rates': rates.map((e) => e.toJson()).toList(),
+        'holdings': holdings.map((e) => e.toJson()).toList(),
       };
 
   factory FinanceSnapshot.fromJson(Map<String, dynamic> json) {
@@ -783,6 +1046,13 @@ class FinanceSnapshot extends Equatable {
       rates: (json['rates'] as List)
           .map((e) => CurrencyRate.fromJson(e as Map<String, dynamic>))
           .toList(),
+      holdings: (json['holdings'] as List?)
+              ?.map(
+                (e) =>
+                    InvestmentHolding.fromJson(e as Map<String, dynamic>),
+              )
+              .toList() ??
+          const [],
     );
   }
 
@@ -796,5 +1066,6 @@ class FinanceSnapshot extends Equatable {
         budgets,
         goals,
         rates,
+        holdings,
       ];
 }

@@ -139,6 +139,21 @@ class SettingsScreen extends StatelessWidget {
                   onTap: () => _editRate(context, repo, rate),
                 ),
               ),
+              const SizedBox(height: 24),
+              Text('Market data', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.key_outlined),
+                title: const Text('Finnhub API token (optional)'),
+                subtitle: Text(
+                    repo.finnhubToken != null && repo.finnhubToken!.isNotEmpty
+                        ? 'Saved on this device only — used when Yahoo is blocked (web)'
+                        : 'Get a free key at finnhub.io. Android/Windows do not need one.',
+                ),
+                trailing: const Icon(Icons.edit_outlined),
+                onTap: () => _editFinnhubToken(context, repo),
+              ),
               const SizedBox(height: 16),
               Text('Data', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
@@ -201,7 +216,7 @@ class SettingsScreen extends StatelessWidget {
               const SizedBox(height: 24),
               Text(
                 'Offline-first · share household by invite link · '
-                'investments roadmap ready',
+                'quotes from Yahoo Finance (Finnhub optional on web)',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ],
@@ -321,6 +336,62 @@ class SettingsScreen extends StatelessWidget {
     controller.dispose();
   }
 
+  Future<void> _editFinnhubToken(
+    BuildContext context,
+    FinanceRepository repo,
+  ) async {
+    final controller = TextEditingController(text: repo.finnhubToken ?? '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Finnhub API token'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Optional. Stored only on this device — never synced or exported. '
+              'Get a free key at finnhub.io. Leave blank to skip Finnhub '
+              '(Android and Windows use Yahoo Finance directly).',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(
+                labelText: 'Token',
+                hintText: 'Paste token',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              controller.clear();
+              Navigator.pop(context, true);
+            },
+            child: const Text('Clear'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await repo.setFinnhubToken(controller.text);
+    }
+    controller.dispose();
+  }
+
   Future<void> _exportCsv(
     BuildContext context,
     FinanceRepository repo,
@@ -388,7 +459,7 @@ class SettingsScreen extends StatelessWidget {
             content: const Text(
               'This file is a full Zentho export. Importing it will replace '
               'settings, profiles, accounts, categories, transactions, '
-              'budgets, goals, and rates.',
+              'budgets, goals, holdings, and rates.',
             ),
             actions: [
               TextButton(

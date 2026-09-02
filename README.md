@@ -12,7 +12,7 @@ Personal finance tracker with household budgets, multi-currency conversion, shar
 
 - Manual transactions + CSV import
 - Goals, recurring/subscription tracking, reports
-- Investments screen stub for upcoming portfolio features
+- Stock/ETF holdings with Yahoo Finance quotes (Finnhub optional on web), allocation, and P/L
 - Responsive UI (phone bottom nav / desktop rail) with widget + unit tests
 
 ## Live web app

@@ -131,7 +131,16 @@ class _AppShellState extends State<AppShell> {
                 icon: const Icon(Icons.add),
                 label: const Text('Add'),
               )
-            : null,
+            : _index == 4
+                ? FloatingActionButton.extended(
+                    onPressed: () =>
+                        InvestmentsScreen.showEditor(context, repo),
+                    backgroundColor: ZenthoColors.tealDeep,
+                    foregroundColor: Colors.white,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Holding'),
+                  )
+                : null,
       ),
     );
   }

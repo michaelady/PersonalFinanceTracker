@@ -7,6 +7,7 @@ import '../../domain/models/models.dart';
 /// Offline-first JSON persistence via SharedPreferences (works on Android, Windows, Web).
 class LocalStore {
   static const _prefsKey = 'zentho_finance_snapshot_v1';
+  static const _updatedAtKey = 'zentho_finance_snapshot_updated_at_v1';
   static const _quotesKey = 'zentho_quote_cache_v1';
   static const _finnhubKey = 'zentho_finnhub_token_v1';
   static const _alphaVantageKey = 'zentho_alphavantage_token_v1';
@@ -25,10 +26,27 @@ class LocalStore {
     }
   }
 
-  Future<void> save(FinanceSnapshot snapshot) async {
+  Future<void> save(FinanceSnapshot snapshot, {DateTime? updatedAt}) async {
     final raw = jsonEncode(snapshot.toJson());
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefsKey, raw);
+    if (updatedAt != null) {
+      await prefs.setString(
+        _updatedAtKey,
+        updatedAt.toUtc().toIso8601String(),
+      );
+    }
+  }
+
+  Future<DateTime?> loadUpdatedAt() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_updatedAtKey);
+      if (raw == null || raw.isEmpty) return null;
+      return DateTime.tryParse(raw)?.toUtc();
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<Map<String, CachedQuote>> loadQuotes() async {
@@ -112,6 +130,7 @@ class LocalStore {
   Future<void> clear() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefsKey);
+    await prefs.remove(_updatedAtKey);
     await prefs.remove(_quotesKey);
     await prefs.remove(_finnhubKey);
     await prefs.remove(_alphaVantageKey);

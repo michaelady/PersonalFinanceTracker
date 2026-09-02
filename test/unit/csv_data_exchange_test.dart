@@ -69,6 +69,16 @@ void main() {
         ownerProfileId: you.id,
         visibility: VisibilityScope.shared,
       );
+      final holding = InvestmentHolding.create(
+        ticker: 'VWCE.DE',
+        displayName: 'Vanguard FTSE All-World',
+        shares: 12.5,
+        averageCostPerShare: 110.2,
+        currencyCode: 'EUR',
+        ownerProfileId: you.id,
+        visibility: VisibilityScope.shared,
+        notes: 'ISA',
+      );
       final snapshot = FinanceSnapshot(
         settings: AppSettings(
           mainCurrency: 'CHF',
@@ -83,6 +93,7 @@ void main() {
         transactions: [expense, income],
         budgets: [budget],
         goals: [goal],
+        holdings: [holding],
         rates: const [
           CurrencyRate(code: 'CHF', rateToMain: 1),
           CurrencyRate(code: 'EUR', rateToMain: 0.93),
@@ -109,6 +120,8 @@ void main() {
       expect(imported.snapshot.transactions, hasLength(2));
       expect(imported.snapshot.budgets.single.allocated, 400);
       expect(imported.snapshot.goals.single.currencyCode, 'EUR');
+      expect(imported.snapshot.holdings.single.ticker, 'VWCE.DE');
+      expect(imported.snapshot.holdings.single.shares, 12.5);
       expect(imported.snapshot.rates.where((r) => r.code == 'EUR').single.rateToMain, 0.93);
 
       final restoredExpense = imported.snapshot.transactions

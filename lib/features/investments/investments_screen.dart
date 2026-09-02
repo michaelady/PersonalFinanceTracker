@@ -47,6 +47,28 @@ class InvestmentsScreen extends StatefulWidget {
     );
   }
 
+  static Future<void> showShareTransactionEditor(
+    BuildContext context,
+    FinanceRepository repo, {
+    ShareTransaction? existing,
+    InvestmentHolding? holding,
+  }) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: _ShareTransactionEditor(
+          existing: existing,
+          initialHolding: holding,
+        ),
+      ),
+    );
+  }
+
   @override
   State<InvestmentsScreen> createState() => _InvestmentsScreenState();
 }
@@ -121,17 +143,29 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Manual lots with Yahoo Finance quotes (unofficial, delayed, '
-              'not advice).',
+              'Lots from your buy/sell history, with Yahoo Finance quotes '
+              '(unofficial, delayed, not advice). Average-cost basis; '
+              'realized P/L from sells + dividends; unrealized vs last price.',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 16),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: FilledButton.tonal(
-                onPressed: () => InvestmentsScreen.showEditor(context, repo),
-                child: const Text('New holding'),
-              ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.tonal(
+                  key: const Key('add-share-transaction'),
+                  onPressed: () => InvestmentsScreen.showShareTransactionEditor(
+                    context,
+                    repo,
+                  ),
+                  child: const Text('Add transaction'),
+                ),
+                FilledButton.tonal(
+                  onPressed: () => InvestmentsScreen.showEditor(context, repo),
+                  child: const Text('New holding'),
+                ),
+              ],
             ),
             const SizedBox(height: 20),
             if (repo.visibleHoldings.isEmpty)
@@ -176,8 +210,38 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
                   selected: chartHoldingId == v.holding.id,
                   onTap: () => _toggleChartHolding(v.holding.id),
                   onEdit: () => _editHolding(repo, v.holding),
+                  onAddTransaction: () =>
+                      InvestmentsScreen.showShareTransactionEditor(
+                    context,
+                    repo,
+                    holding: v.holding,
+                  ),
                 ),
               ),
+              const SizedBox(height: 24),
+              Text(
+                'Transactions',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 8),
+              if (repo.visibleShareTransactions.isEmpty)
+                Text(
+                  'Record buys, sells, dividends, fees, and splits. Holdings '
+                  'and P/L update from this list.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                )
+              else
+                ...repo.visibleShareTransactions.map(
+                  (tx) => _ShareTransactionTile(
+                    tx: tx,
+                    holding: repo.holdingById(tx.holdingId),
+                    onTap: () => InvestmentsScreen.showShareTransactionEditor(
+                      context,
+                      repo,
+                      existing: tx,
+                    ),
+                  ),
+                ),
             ],
           ],
         ),
@@ -208,9 +272,10 @@ class _EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Add stocks, ETFs, or Yahoo-style symbols (AAPL, VWCE.DE, BTC-USD) '
-            'with shares and average cost. Quotes come from Yahoo Finance — '
-            'unofficial, delayed, and not investment advice.',
+            'Add a ticker and record share transactions (buy, sell, dividend, '
+            'fee, split). Quotes come from Yahoo Finance — unofficial, delayed, '
+            'and not investment advice. Quantity, cost basis, and P/L are '
+            'derived from the transaction list.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 10),
@@ -293,9 +358,27 @@ class _TotalsCard extends StatelessWidget {
               if (pl != null)
                 _LabeledMoney(
                   label: portfolio.unrealizedPlPercent == null
-                      ? 'P/L'
-                      : 'P/L ${portfolio.unrealizedPlPercent!.toStringAsFixed(1)}%',
+                      ? 'Unrealized'
+                      : 'Unrealized ${portfolio.unrealizedPlPercent!.toStringAsFixed(1)}%',
                   amount: pl,
+                  currency: currency,
+                  signed: true,
+                ),
+              if (portfolio.realizedPlMain != 0 || portfolio.dividendMain != 0)
+                _LabeledMoney(
+                  label: 'Realized',
+                  amount: portfolio.realizedPlMain + portfolio.dividendMain,
+                  currency: currency,
+                  signed: true,
+                ),
+              if (portfolio.totalPlMain != null &&
+                  (portfolio.realizedPlMain != 0 ||
+                      portfolio.dividendMain != 0))
+                _LabeledMoney(
+                  label: portfolio.totalPlPercent == null
+                      ? 'Total P/L'
+                      : 'Total ${portfolio.totalPlPercent!.toStringAsFixed(1)}% vs invested',
+                  amount: portfolio.totalPlMain!,
                   currency: currency,
                   signed: true,
                 ),
@@ -382,6 +465,7 @@ class _ChartBlock extends StatelessWidget {
       mainCurrency: currency,
       rates: repo.rates,
       range: range,
+      shareTransactions: repo.shareTransactions,
     );
     final twoPointFallback = PortfolioMath.chartUsesLastCloseFallback(
       holdings: selected,
@@ -704,6 +788,7 @@ class _HoldingTile extends StatelessWidget {
     required this.selected,
     required this.onTap,
     required this.onEdit,
+    required this.onAddTransaction,
   });
 
   final HoldingValuation valuation;
@@ -711,6 +796,7 @@ class _HoldingTile extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onEdit;
+  final VoidCallback onAddTransaction;
 
   @override
   Widget build(BuildContext context) {
@@ -782,6 +868,13 @@ class _HoldingTile extends StatelessWidget {
                     signed: true,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
+                if (valuation.realizedPlMain != 0 || valuation.dividendMain != 0)
+                  Text(
+                    'Realized ${_signedShort(valuation.realizedPlMain + valuation.dividendMain, currency)}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: ZenthoColors.inkMuted,
+                        ),
+                  ),
                 if (valuation.unrealizedPlPercent != null)
                   Text(
                     '${valuation.unrealizedPlPercent!.toStringAsFixed(1)}%',
@@ -792,6 +885,13 @@ class _HoldingTile extends StatelessWidget {
                         ),
                   ),
               ],
+            ),
+            IconButton(
+              key: ValueKey('add-tx-${h.id}'),
+              tooltip: 'Add transaction',
+              visualDensity: VisualDensity.compact,
+              onPressed: onAddTransaction,
+              icon: const Icon(Icons.add),
             ),
             IconButton(
               key: ValueKey('edit-holding-${h.id}'),
@@ -810,6 +910,25 @@ class _HoldingTile extends StatelessWidget {
 String _sharesLabel(double shares) {
   if (shares == shares.roundToDouble()) return shares.toStringAsFixed(0);
   return shares.toStringAsFixed(4);
+}
+
+String _signedShort(double amount, String currency) {
+  final prefix = amount > 0
+      ? '+'
+      : amount < 0
+          ? '−'
+          : '';
+  return '$prefix$currency ${amount.abs().toStringAsFixed(2)}';
+}
+
+String _shareTxTypeLabel(ShareTransactionType type) {
+  return switch (type) {
+    ShareTransactionType.buy => 'Buy',
+    ShareTransactionType.sell => 'Sell',
+    ShareTransactionType.dividend => 'Dividend',
+    ShareTransactionType.fee => 'Fee',
+    ShareTransactionType.split => 'Split',
+  };
 }
 
 String? _sourceLabel(String? source) {
@@ -913,6 +1032,8 @@ class _HoldingEditorState extends State<_HoldingEditor> {
   Widget build(BuildContext context) {
     final repo = context.watch<FinanceRepository>();
     final isEditing = widget.existing != null;
+    final hasLedger = widget.existing != null &&
+        repo.shareTransactions.any((t) => t.holdingId == widget.existing!.id);
     return SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
@@ -974,21 +1095,38 @@ class _HoldingEditorState extends State<_HoldingEditor> {
               decoration: const InputDecoration(labelText: 'Display name'),
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _shares,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Shares'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _cost,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Average cost per share',
+            if (hasLedger) ...[
+              Text(
+                'Shares ${_sharesLabel(widget.existing!.shares)} · avg cost '
+                '${widget.existing!.averageCostPerShare.toStringAsFixed(2)} '
+                '${widget.existing!.currencyCode}',
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
-            ),
+              const SizedBox(height: 4),
+              Text(
+                'Quantity and average cost come from the transaction list. '
+                'Add a buy or sell to change this lot.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: ZenthoColors.inkMuted,
+                    ),
+              ),
+            ] else ...[
+              TextField(
+                controller: _shares,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Shares'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _cost,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Average cost per share',
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               // ignore: deprecated_member_use
@@ -1084,9 +1222,15 @@ class _HoldingEditorState extends State<_HoldingEditor> {
 
   Future<void> _save(FinanceRepository repo) async {
     final ticker = _ticker.text.trim().toUpperCase();
-    final shares = double.tryParse(_shares.text.trim()) ?? 0;
-    final cost = double.tryParse(_cost.text.trim()) ?? 0;
-    if (ticker.isEmpty || shares <= 0) {
+    final hasLedger = widget.existing != null &&
+        repo.shareTransactions.any((t) => t.holdingId == widget.existing!.id);
+    final shares = hasLedger
+        ? widget.existing!.shares
+        : double.tryParse(_shares.text.trim()) ?? 0;
+    final cost = hasLedger
+        ? widget.existing!.averageCostPerShare
+        : double.tryParse(_cost.text.trim()) ?? 0;
+    if (ticker.isEmpty || (!hasLedger && shares <= 0)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter a ticker and shares')),
       );
@@ -1124,5 +1268,491 @@ class _HoldingEditorState extends State<_HoldingEditor> {
       );
     }
     if (mounted) Navigator.pop(context);
+  }
+}
+
+class _ShareTransactionTile extends StatelessWidget {
+  const _ShareTransactionTile({
+    required this.tx,
+    required this.holding,
+    required this.onTap,
+  });
+
+  final ShareTransaction tx;
+  final InvestmentHolding? holding;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ticker = holding?.ticker ?? 'Holding';
+    final subtitle = switch (tx.type) {
+      ShareTransactionType.buy || ShareTransactionType.sell => [
+          '${_sharesLabel(tx.shares)} sh @ ${tx.pricePerShare.toStringAsFixed(2)}',
+          if (tx.fee > 0) 'fee ${tx.fee.toStringAsFixed(2)}',
+          DateFormat.yMMMd().format(tx.date),
+          if (tx.notes.isNotEmpty) tx.notes,
+        ].join(' · '),
+      ShareTransactionType.dividend => [
+          holding == null
+              ? tx.amount.toStringAsFixed(2)
+              : '${holding!.currencyCode} ${tx.amount.toStringAsFixed(2)}',
+          DateFormat.yMMMd().format(tx.date),
+          if (tx.notes.isNotEmpty) tx.notes,
+        ].join(' · '),
+      ShareTransactionType.fee => [
+          holding == null
+              ? tx.amount.toStringAsFixed(2)
+              : '${holding!.currencyCode} ${tx.amount.toStringAsFixed(2)}',
+          DateFormat.yMMMd().format(tx.date),
+          if (tx.notes.isNotEmpty) tx.notes,
+        ].join(' · '),
+      ShareTransactionType.split => [
+          '${_sharesLabel(tx.shares)}-for-1',
+          DateFormat.yMMMd().format(tx.date),
+          if (tx.notes.isNotEmpty) tx.notes,
+        ].join(' · '),
+    };
+    return ListTile(
+      key: ValueKey('share-tx-${tx.id}'),
+      contentPadding: EdgeInsets.zero,
+      title: Text('${_shareTxTypeLabel(tx.type)} · $ticker'),
+      subtitle: Text(subtitle),
+      onTap: onTap,
+    );
+  }
+}
+
+class _ShareTransactionEditor extends StatefulWidget {
+  const _ShareTransactionEditor({
+    this.existing,
+    this.initialHolding,
+  });
+
+  final ShareTransaction? existing;
+  final InvestmentHolding? initialHolding;
+
+  @override
+  State<_ShareTransactionEditor> createState() =>
+      _ShareTransactionEditorState();
+}
+
+class _ShareTransactionEditorState extends State<_ShareTransactionEditor> {
+  late final TextEditingController _ticker;
+  late final TextEditingController _name;
+  late final TextEditingController _shares;
+  late final TextEditingController _price;
+  late final TextEditingController _amount;
+  late final TextEditingController _fee;
+  late final TextEditingController _notes;
+  late ShareTransactionType _type;
+  late DateTime _date;
+  late String _currency;
+  late VisibilityScope _visibility;
+  String? _holdingId;
+  String? _accountId;
+  List<TickerSearchResult> _matches = [];
+  Timer? _searchTimer;
+  bool _searching = false;
+  var _didInitCurrency = false;
+
+  bool get _isEditing => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.existing;
+    final initial = widget.initialHolding;
+    _type = existing?.type ?? ShareTransactionType.buy;
+    _date = existing?.date ?? DateTime.now();
+    _holdingId = existing?.holdingId ?? initial?.id;
+    _ticker = TextEditingController(text: initial?.ticker ?? '');
+    _name = TextEditingController(text: initial?.displayName ?? '');
+    _shares = TextEditingController(
+      text: existing == null || existing.shares == 0
+          ? ''
+          : _sharesLabel(existing.shares),
+    );
+    _price = TextEditingController(
+      text: existing == null || existing.pricePerShare == 0
+          ? ''
+          : existing.pricePerShare.toString(),
+    );
+    _amount = TextEditingController(
+      text: existing == null || existing.amount == 0
+          ? ''
+          : existing.amount.toString(),
+    );
+    _fee = TextEditingController(
+      text: existing == null || existing.fee == 0 ? '' : existing.fee.toString(),
+    );
+    _notes = TextEditingController(text: existing?.notes ?? '');
+    _currency = initial?.currencyCode ?? 'USD';
+    _visibility = initial?.visibility ?? VisibilityScope.shared;
+    _accountId = initial?.accountId;
+    _ticker.addListener(_onTickerChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final repo = context.read<FinanceRepository>();
+    if (_holdingId != null) {
+      final holding = repo.holdingById(_holdingId!);
+      if (holding != null && _ticker.text.isEmpty) {
+        _ticker.text = holding.ticker;
+        if (_name.text.isEmpty) _name.text = holding.displayName;
+        _currency = holding.currencyCode;
+        _visibility = holding.visibility;
+        _accountId = holding.accountId;
+      }
+    }
+    if (_didInitCurrency) return;
+    _didInitCurrency = true;
+    if (widget.initialHolding == null && widget.existing == null) {
+      _currency = repo.settings.mainCurrency;
+    }
+  }
+
+  void _onTickerChanged() {
+    if (_holdingId != null) return;
+    _searchTimer?.cancel();
+    final q = _ticker.text.trim();
+    if (q.isEmpty) {
+      setState(() => _matches = []);
+      return;
+    }
+    _searchTimer = Timer(const Duration(milliseconds: 400), () async {
+      if (!mounted) return;
+      setState(() => _searching = true);
+      final results = await context.read<FinanceRepository>().searchTickers(q);
+      if (!mounted) return;
+      setState(() {
+        _matches = results;
+        _searching = false;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchTimer?.cancel();
+    _ticker.removeListener(_onTickerChanged);
+    _ticker.dispose();
+    _name.dispose();
+    _shares.dispose();
+    _price.dispose();
+    _amount.dispose();
+    _fee.dispose();
+    _notes.dispose();
+    super.dispose();
+  }
+
+  bool get _needsShares =>
+      _type == ShareTransactionType.buy ||
+      _type == ShareTransactionType.sell ||
+      _type == ShareTransactionType.split;
+
+  bool get _needsPrice =>
+      _type == ShareTransactionType.buy || _type == ShareTransactionType.sell;
+
+  bool get _needsAmount =>
+      _type == ShareTransactionType.dividend ||
+      _type == ShareTransactionType.fee;
+
+  @override
+  Widget build(BuildContext context) {
+    final repo = context.watch<FinanceRepository>();
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              _isEditing ? 'Edit transaction' : 'Add transaction',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<ShareTransactionType>(
+              key: const Key('share-tx-type'),
+              // ignore: deprecated_member_use
+              value: _type,
+              decoration: const InputDecoration(labelText: 'Type'),
+              items: [
+                for (final t in ShareTransactionType.values)
+                  DropdownMenuItem(
+                    value: t,
+                    child: Text(_shareTxTypeLabel(t)),
+                  ),
+              ],
+              onChanged: (v) {
+                if (v != null) setState(() => _type = v);
+              },
+            ),
+            const SizedBox(height: 12),
+            if (repo.holdings.isNotEmpty)
+              DropdownButtonFormField<String?>(
+                key: const Key('share-tx-holding'),
+                // ignore: deprecated_member_use
+                value: _holdingId,
+                decoration: const InputDecoration(labelText: 'Holding'),
+                items: [
+                  const DropdownMenuItem(
+                    value: null,
+                    child: Text('New ticker'),
+                  ),
+                  for (final h in repo.visibleHoldings)
+                    DropdownMenuItem(
+                      value: h.id,
+                      child: Text(
+                        h.displayName.isEmpty
+                            ? h.ticker
+                            : '${h.displayName} · ${h.ticker}',
+                      ),
+                    ),
+                ],
+                onChanged: _isEditing
+                    ? null
+                    : (v) {
+                        setState(() {
+                          _holdingId = v;
+                          _matches = [];
+                          if (v == null) return;
+                          final h = repo.holdingById(v);
+                          if (h == null) return;
+                          _ticker.text = h.ticker;
+                          _name.text = h.displayName;
+                          _currency = h.currencyCode;
+                          _visibility = h.visibility;
+                          _accountId = h.accountId;
+                        });
+                      },
+              ),
+            if (_holdingId == null) ...[
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('share-tx-ticker'),
+                controller: _ticker,
+                textCapitalization: TextCapitalization.characters,
+                decoration: InputDecoration(
+                  labelText: 'Ticker',
+                  hintText: 'AAPL, VWCE.DE, BTC-USD',
+                  suffixIcon: _searching
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : null,
+                ),
+              ),
+              if (_matches.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                ..._matches.take(6).map(
+                      (m) => ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(m.symbol),
+                        subtitle: Text(
+                          [
+                            m.name,
+                            if (m.exchange != null) m.exchange,
+                            if (m.typeLabel != null) m.typeLabel,
+                          ].join(' · '),
+                        ),
+                        onTap: () {
+                          _ticker.text = m.symbol;
+                          if (_name.text.trim().isEmpty) _name.text = m.name;
+                          setState(() => _matches = []);
+                        },
+                      ),
+                    ),
+              ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: _name,
+                decoration: const InputDecoration(labelText: 'Display name'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                // ignore: deprecated_member_use
+                value: _currency,
+                decoration: const InputDecoration(labelText: 'Currency'),
+                items: [
+                  for (final c in SupportedCurrencies.codes)
+                    DropdownMenuItem(value: c, child: Text(c)),
+                ],
+                onChanged: (v) => setState(() => _currency = v ?? _currency),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<VisibilityScope>(
+                // ignore: deprecated_member_use
+                value: _visibility,
+                decoration: const InputDecoration(labelText: 'Visibility'),
+                items: const [
+                  DropdownMenuItem(
+                    value: VisibilityScope.shared,
+                    child: Text('Shared'),
+                  ),
+                  DropdownMenuItem(
+                    value: VisibilityScope.private,
+                    child: Text('Private'),
+                  ),
+                ],
+                onChanged: (v) =>
+                    setState(() => _visibility = v ?? _visibility),
+              ),
+            ],
+            const SizedBox(height: 12),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Date'),
+              subtitle: Text(DateFormat.yMMMd().format(_date)),
+              trailing: const Icon(Icons.calendar_today_outlined),
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _date,
+                  firstDate: DateTime(1990),
+                  lastDate: DateTime(2100),
+                );
+                if (picked != null) setState(() => _date = picked);
+              },
+            ),
+            if (_needsShares) ...[
+              TextField(
+                key: const Key('share-tx-shares'),
+                controller: _shares,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: _type == ShareTransactionType.split
+                      ? 'Split ratio'
+                      : 'Shares',
+                  hintText: _type == ShareTransactionType.split
+                      ? '2 for a 2-for-1 split'
+                      : null,
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (_needsPrice) ...[
+              TextField(
+                key: const Key('share-tx-price'),
+                controller: _price,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Price per share',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _fee,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Commission / fee (optional)',
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (_needsAmount) ...[
+              TextField(
+                key: const Key('share-tx-amount'),
+                controller: _amount,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: _type == ShareTransactionType.dividend
+                      ? 'Cash dividend'
+                      : 'Fee amount',
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            TextField(
+              controller: _notes,
+              decoration: const InputDecoration(labelText: 'Notes'),
+            ),
+            const SizedBox(height: 20),
+            FilledButton(
+              key: const Key('share-tx-save'),
+              onPressed: () => _save(repo),
+              child: Text(_isEditing ? 'Save changes' : 'Save'),
+            ),
+            if (_isEditing) ...[
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () async {
+                  final error = await repo.deleteShareTransaction(
+                    widget.existing!.id,
+                  );
+                  if (!context.mounted) return;
+                  if (error != null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(error)),
+                    );
+                    return;
+                  }
+                  Navigator.pop(context);
+                },
+                child: Text(
+                  'Delete',
+                  style: TextStyle(color: ZenthoColors.coral),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _save(FinanceRepository repo) async {
+    final shares = double.tryParse(_shares.text.trim()) ?? 0;
+    final price = double.tryParse(_price.text.trim()) ?? 0;
+    final amount = double.tryParse(_amount.text.trim()) ?? 0;
+    final fee = double.tryParse(_fee.text.trim()) ?? 0;
+    String? error;
+    if (_isEditing) {
+      error = await repo.updateShareTransaction(
+        widget.existing!.copyWith(
+          type: _type,
+          date: _date,
+          shares: shares,
+          pricePerShare: price,
+          amount: amount,
+          fee: fee,
+          notes: _notes.text.trim(),
+        ),
+      );
+    } else {
+      error = await repo.addShareTransactionForTicker(
+        ticker: _ticker.text,
+        displayName: _name.text,
+        currencyCode: _currency,
+        visibility: _visibility,
+        accountId: _accountId,
+        holdingId: _holdingId,
+        type: _type,
+        date: _date,
+        shares: shares,
+        pricePerShare: price,
+        amount: amount,
+        fee: fee,
+        notes: _notes.text.trim(),
+      );
+    }
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
+    Navigator.pop(context);
   }
 }

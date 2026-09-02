@@ -86,9 +86,11 @@ void main() {
       goals: const [],
       rates: const [CurrencyRate(code: 'USD', rateToMain: 1)],
     ).toJson()
-      ..remove('holdings');
+      ..remove('holdings')
+      ..remove('shareTransactions');
 
     final restored = FinanceSnapshot.fromJson(json);
     expect(restored.holdings, isEmpty);
+    expect(restored.shareTransactions, isEmpty);
   });
 }

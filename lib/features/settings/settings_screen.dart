@@ -605,7 +605,7 @@ class SettingsScreen extends StatelessWidget {
             content: const Text(
               'This file is a full Zentho export. Importing it will replace '
               'settings, profiles, accounts, categories, transactions, '
-              'budgets, goals, holdings, and rates.',
+              'budgets, goals, holdings, share transactions, and rates.',
             ),
             actions: [
               TextButton(

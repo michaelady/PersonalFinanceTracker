@@ -19,6 +19,7 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Zentho — personal finance tracker with household budgets and multi-currency.">
+  <meta name="theme-color" content="#0B6E6E">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -31,10 +32,152 @@
 
   <title>Zentho</title>
   <link rel="manifest" href="manifest.json">
-  <!-- Bill/invoice OCR (loaded eagerly so first scan is faster) -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <!--
+    Static HTML splash: paints with the first document, before canvaskit /
+    main.dart.js / the Flutter engine. Do not replace this with a Dart
+    CircularProgressIndicator — that cannot show until the first Flutter frame.
+    Colors match ZenthoColors (tealDeep, mint, creamMist, line).
+  -->
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #F7FBFA;
+    }
+    body {
+      overflow: hidden;
+    }
+    #zentho-splash {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      background: #F7FBFA;
+      color: #0B6E6E;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      transition: opacity 180ms ease-out;
+    }
+    #zentho-splash.zentho-splash--hide {
+      opacity: 0;
+      pointer-events: none;
+    }
+    #zentho-splash .zentho-mark {
+      width: 52px;
+      height: 52px;
+      display: block;
+    }
+    #zentho-splash .zentho-wordmark {
+      font-size: 22px;
+      font-weight: 650;
+      letter-spacing: -0.4px;
+      line-height: 1;
+    }
+    #zentho-splash .zentho-spinner {
+      width: 28px;
+      height: 28px;
+      box-sizing: border-box;
+      border: 3px solid #D5E3E1;
+      border-top-color: #0B6E6E;
+      border-radius: 50%;
+      animation: zentho-spin 0.75s linear infinite;
+    }
+    @keyframes zentho-spin {
+      to { transform: rotate(360deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #zentho-splash .zentho-spinner {
+        animation: none;
+        border-top-color: #D5E3E1;
+        background: conic-gradient(#0B6E6E 0 25%, #D5E3E1 0);
+        mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+      }
+    }
+  </style>
+  <script>
+    // Register before flutter_bootstrap.js (async) so first-frame cannot be missed.
+    // Generated flutter_bootstrap.js is left untouched: a custom onEntrypointLoaded
+    // callback would skip forwarding the build config to initializeEngine().
+    (function () {
+      var firstFrameSeen = false;
+      var hidden = false;
+
+      function hideZenthoSplash() {
+        var el = document.getElementById('zentho-splash');
+        if (!el || hidden) return;
+        hidden = true;
+        el.classList.add('zentho-splash--hide');
+        window.setTimeout(function () {
+          if (el.parentNode) el.parentNode.removeChild(el);
+        }, 220);
+      }
+
+      window.addEventListener('flutter-first-frame', function () {
+        firstFrameSeen = true;
+        hideZenthoSplash();
+      });
+
+      function flutterHostReady() {
+        return document.querySelector('flutter-view, flt-glass-pane');
+      }
+
+      function watchForFlutterHost() {
+        if (firstFrameSeen) {
+          hideZenthoSplash();
+          return;
+        }
+        if (flutterHostReady()) {
+          window.setTimeout(function () {
+            if (!hidden) hideZenthoSplash();
+          }, 2500);
+          return;
+        }
+        if (!window.MutationObserver) return;
+        var obs = new MutationObserver(function () {
+          if (!flutterHostReady()) return;
+          obs.disconnect();
+          // First-frame should follow; if this engine never emits it, drop the overlay.
+          window.setTimeout(function () {
+            if (!hidden) hideZenthoSplash();
+          }, 2500);
+        });
+        obs.observe(document.documentElement, { childList: true, subtree: true });
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', watchForFlutterHost);
+      } else {
+        watchForFlutterHost();
+      }
+    })();
+  </script>
+  <!-- Bill/invoice OCR (async so it does not block first HTML paint of the splash) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" async></script>
 </head>
 <body>
+  <div id="zentho-splash" role="status" aria-live="polite" aria-label="Loading Zentho">
+    <!-- Inline mark: same geometry as ZenthoMark, no extra asset / base-href fetch. -->
+    <svg class="zentho-mark" viewBox="0 0 52 52" aria-hidden="true">
+      <defs>
+        <linearGradient id="zentho-mark-bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#E8F5F2"/>
+          <stop offset="1" stop-color="#D6EAF2"/>
+        </linearGradient>
+      </defs>
+      <rect x="1" y="1" width="50" height="50" rx="14.5" fill="url(#zentho-mark-bg)"/>
+      <path d="M14.6 15.6 H37.4 L14.6 36.4 H37.4"
+            fill="none" stroke="#0B6E6E" stroke-width="6.2"
+            stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="37.4" cy="26" r="4.2" fill="#E39B2E"/>
+    </svg>
+    <div class="zentho-wordmark">Zentho</div>
+    <div class="zentho-spinner" aria-hidden="true"></div>
+  </div>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader

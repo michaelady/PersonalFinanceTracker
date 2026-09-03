@@ -1,4 +1,5 @@
 import '../models/models.dart';
+import 'money_math.dart';
 import 'supported_currencies.dart';
 
 class ParsedBillLine {
@@ -24,6 +25,7 @@ class ParsedBill {
     required this.lines,
     required this.rawText,
     required this.suggestedCategoryName,
+    this.printedTotal,
   });
 
   final String merchant;
@@ -33,6 +35,26 @@ class ParsedBill {
   final List<ParsedBillLine> lines;
   final String rawText;
   final String suggestedCategoryName;
+
+  /// Labeled TOTAL / amount due from the receipt, when OCR found one.
+  /// Null means no printed total was detected (do not treat [total] as gospel).
+  final double? printedTotal;
+
+  double get itemsSum => lines.fold<double>(0, (s, l) => s + l.amount);
+
+  /// Printed TOTAL minus line-item sum, rounded to the currency minor unit.
+  /// Null when no labeled TOTAL was found.
+  double? get printedTotalDelta {
+    if (printedTotal == null || printedTotal! <= 0) return null;
+    final printed = MoneyMath.roundToMinorUnits(printedTotal!, currencyCode);
+    final sum = MoneyMath.roundToMinorUnits(itemsSum, currencyCode);
+    return MoneyMath.roundToMinorUnits(printed - sum, currencyCode);
+  }
+
+  bool get printedTotalMismatches {
+    final delta = printedTotalDelta;
+    return delta != null && delta.abs() >= 0.005;
+  }
 }
 
 /// Heuristic bill/invoice text parser + category suggestions.
@@ -54,8 +76,16 @@ abstract final class BillParser {
     ],
     'Dining': [
       'restaurant',
+      'ristorante',
+      'trattoria',
+      'osteria',
+      'pizzeria',
+      'brasserie',
       'cafe',
       'coffee',
+      'espresso',
+      'cappuccino',
+      'latte',
       'pizza',
       'burger',
       'bistro',
@@ -131,7 +161,9 @@ abstract final class BillParser {
         .toList();
 
     final currency = _detectCurrency(text) ?? fallbackCurrency;
-    final total = _detectTotal(text) ?? _largestAmount(text) ?? 0;
+    final printedTotal = _detectLabeledTotal(text);
+    final total =
+        printedTotal ?? _detectTotal(text) ?? _largestAmount(text) ?? 0;
     final date = _detectDate(text) ?? (now ?? DateTime.now());
     final merchant = _detectMerchant(lines) ?? 'Scanned bill';
     final category = suggestCategory('$merchant\n$text');
@@ -152,7 +184,7 @@ abstract final class BillParser {
         ParsedBillLine(
           description: desc.isEmpty ? 'Item' : desc,
           amount: amount,
-          categoryName: suggestCategory('$merchant $desc'),
+          categoryName: suggestCategory(desc, fallback: category),
           currencyCode: currency,
         ),
       );
@@ -175,6 +207,7 @@ abstract final class BillParser {
       total: total > 0
           ? total
           : itemLines.fold<double>(0, (s, l) => s + l.amount),
+      printedTotal: printedTotal,
       currencyCode: currency,
       date: date,
       lines: itemLines,
@@ -183,14 +216,14 @@ abstract final class BillParser {
     );
   }
 
-  static String suggestCategory(String haystack) {
+  static String suggestCategory(String haystack, {String? fallback}) {
     final lower = haystack.toLowerCase();
     for (final entry in _categoryKeywords.entries) {
       for (final keyword in entry.value) {
         if (lower.contains(keyword)) return entry.key;
       }
     }
-    return 'Fun';
+    return fallback ?? 'Fun';
   }
 
   static String? _detectCurrency(String text) {
@@ -205,23 +238,31 @@ abstract final class BillParser {
     return null;
   }
 
+  static final _labeledTotalPattern = RegExp(
+    r'(?:total|amount due|balance due|grand total|summe|total ttc|zu zahlen)\s*[:\-]?\s*(?:CHF|EUR|USD|GBP|RON|CAD|AUD|JPY|\$|€|£)?\s*(-?\d+[.,]\d{2})',
+    caseSensitive: false,
+  );
+
+  /// TOTAL / amount-due printed on the receipt (not an inferred largest line).
+  static double? _detectLabeledTotal(String text) {
+    final matches = _labeledTotalPattern.allMatches(text).toList();
+    if (matches.isEmpty) return null;
+    final amount = _parseAmount(matches.last.group(1)!);
+    if (amount != null && amount > 0) return amount;
+    return null;
+  }
+
   static double? _detectTotal(String text) {
-    final patterns = [
-      RegExp(
-        r'(?:total|amount due|balance due|grand total|summe|total ttc|zu zahlen)\s*[:\-]?\s*(?:CHF|EUR|USD|GBP|RON|CAD|AUD|JPY|\$|€|£)?\s*(-?\d+[.,]\d{2})',
-        caseSensitive: false,
-      ),
-      RegExp(
-        r'(?:CHF|EUR|USD|GBP|RON|CAD|AUD|JPY|\$|€|£)\s*(-?\d+[.,]\d{2})\s*(?:total)?',
-        caseSensitive: false,
-      ),
-    ];
-    for (final pattern in patterns) {
-      final matches = pattern.allMatches(text).toList();
-      if (matches.isEmpty) continue;
-      final amount = _parseAmount(matches.last.group(1)!);
-      if (amount != null && amount > 0) return amount;
-    }
+    final labeled = _detectLabeledTotal(text);
+    if (labeled != null) return labeled;
+    final pattern = RegExp(
+      r'(?:CHF|EUR|USD|GBP|RON|CAD|AUD|JPY|\$|€|£)\s*(-?\d+[.,]\d{2})\s*(?:total)?',
+      caseSensitive: false,
+    );
+    final matches = pattern.allMatches(text).toList();
+    if (matches.isEmpty) return null;
+    final amount = _parseAmount(matches.last.group(1)!);
+    if (amount != null && amount > 0) return amount;
     return null;
   }
 

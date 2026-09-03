@@ -101,6 +101,14 @@ abstract final class ZenthoTheme {
           borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: ZenthoColors.teal, width: 1.6),
         ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: ZenthoColors.coral),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: ZenthoColors.coral, width: 1.6),
+        ),
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: Colors.white.withValues(alpha: 0.92),

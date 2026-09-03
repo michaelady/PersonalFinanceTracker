@@ -58,7 +58,7 @@ Most phones: download [`android-dist/Zentho-arm64.apk`](android-dist/Zentho-arm6
 ./scripts/build-android-apk.sh
 ```
 
-The release APK is signed with the Android debug key so you can sideload it. Use a real release keystore before Play Store. Google sign-in on Android needs the debug/upload SHA-1 registered on Firebase app `zentho-db83e`; everything else works unsigned-in.
+The release APK is signed with the Android debug key so you can sideload it. Use a real release keystore before Play Store. Google sign-in on Android uses the same Firebase web project (`zentho-db83e`) via Identity Toolkit — it does not need a native Android app id. Unsigned-in use stays on this device.
 
 ## Test
 

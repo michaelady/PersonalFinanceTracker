@@ -49,4 +49,13 @@ abstract final class DefaultFirebaseOptions {
     authDomain: 'zentho-db83e.firebaseapp.com',
     storageBucket: 'zentho-db83e.firebasestorage.app',
   );
+
+  /// Web OAuth client auto-created with Google sign-in. Used as
+  /// `serverClientId` on Android and as the browser OAuth client when the
+  /// native Google Sign-In plugin cannot run (no Android Firebase app / SHA-1).
+  static const String googleWebClientId =
+      '1086631824200-a62ucca9e472i6okfd1d7dol59r96v9c.apps.googleusercontent.com';
+
+  static const String authHandlerUrl =
+      'https://zentho-db83e.firebaseapp.com/__/auth/handler';
 }

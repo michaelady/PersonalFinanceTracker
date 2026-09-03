@@ -75,6 +75,9 @@ class FirebaseAuthService implements AuthService {
         GoogleAuthProvider.credential(idToken: idToken),
       );
     } catch (_) {
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        rethrow;
+      }
       // Windows (and any host without the plugin) uses Firebase's provider flow.
       return await _auth.signInWithProvider(provider);
     }

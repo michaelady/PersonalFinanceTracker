@@ -8,12 +8,15 @@ import 'features/user/household_join_gate.dart';
 import 'theme/zentho_theme.dart';
 
 class ZenthoApp extends StatelessWidget {
-  const ZenthoApp({super.key});
+  const ZenthoApp({super.key, this.navigatorKey});
+
+  final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Zentho',
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: ZenthoTheme.light(),
       home: Consumer<FinanceRepository>(

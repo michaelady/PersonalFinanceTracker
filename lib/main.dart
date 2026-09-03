@@ -36,11 +36,11 @@ Future<void> main() async {
     userCloud: userCloud,
     householdCloud: householdCloud,
   );
-  await repo.init();
   runApp(
     ChangeNotifierProvider.value(
       value: repo,
       child: const ZenthoApp(),
     ),
   );
+  await repo.init();
 }

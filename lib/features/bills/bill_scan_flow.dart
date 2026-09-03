@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
 import '../../domain/services/bill_parser.dart';
+import '../../domain/services/money_math.dart';
 import '../../domain/services/ocr_service.dart';
 import '../../domain/services/supported_currencies.dart';
 import '../../theme/zentho_colors.dart';
@@ -247,6 +248,30 @@ class _BillReviewScreenState extends State<BillReviewScreen> {
     super.dispose();
   }
 
+  double get _selectedSum => _lines
+      .where((l) => l.selected && l.amount > 0)
+      .fold<double>(0, (s, l) => s + l.amount);
+
+  double? get _printedTotal {
+    final printed = widget.initial.printedTotal;
+    if (printed == null || printed <= 0) return null;
+    return printed;
+  }
+
+  double? get _printedTotalDelta {
+    final printed = _printedTotal;
+    if (printed == null) return null;
+    return MoneyMath.roundToMinorUnits(printed - _selectedSum, _currency);
+  }
+
+  bool get _printedTotalMismatches {
+    final delta = _printedTotalDelta;
+    return delta != null && delta.abs() >= 0.005;
+  }
+
+  String _money(double value) =>
+      value.toStringAsFixed(SupportedCurrencies.fractionDigits(_currency));
+
   Future<void> _save() async {
     final repo = context.read<FinanceRepository>();
     final selected = _lines.where((l) => l.selected && l.amount > 0).toList();
@@ -258,32 +283,44 @@ class _BillReviewScreenState extends State<BillReviewScreen> {
     }
 
     final merchant = _merchant.text.trim();
+    final createdIds = <String>[];
     for (final line in selected) {
       final note = [
         if (merchant.isNotEmpty) merchant,
         if (line.description.isNotEmpty && line.description != merchant)
           line.description,
       ].join(' · ');
-      await repo.addTransaction(
-        MoneyTransaction.create(
-          type: TransactionType.expense,
-          amount: line.amount,
-          currencyCode: _currency,
-          accountId: _accountId,
-          categoryId: line.categoryId,
-          date: _date,
-          ownerProfileId: repo.settings.activeProfileId,
-          visibility: _visibility,
-          note: note,
-        ),
+      final tx = MoneyTransaction.create(
+        type: TransactionType.expense,
+        amount: line.amount,
+        currencyCode: _currency,
+        accountId: _accountId,
+        categoryId: line.categoryId,
+        date: _date,
+        ownerProfileId: repo.settings.activeProfileId,
+        visibility: _visibility,
+        note: note,
       );
+      await repo.addTransaction(tx);
+      createdIds.add(tx.id);
     }
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Added ${selected.length} expense(s) from bill')),
-    );
+    final messenger = ScaffoldMessenger.of(context);
     Navigator.pop(context);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('Added ${selected.length} expense(s) from bill'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () async {
+            for (final id in createdIds) {
+              await repo.deleteTransaction(id);
+            }
+          },
+        ),
+      ),
+    );
   }
 
   @override
@@ -365,6 +402,17 @@ class _BillReviewScreenState extends State<BillReviewScreen> {
             },
           ),
           const SizedBox(height: 8),
+          if (_printedTotal != null) ...[
+            _TotalReconciliationBanner(
+              printedTotal: _printedTotal!,
+              selectedSum: _selectedSum,
+              delta: _printedTotalDelta ?? 0,
+              currencyCode: _currency,
+              money: _money,
+              mismatch: _printedTotalMismatches,
+            ),
+            const SizedBox(height: 12),
+          ],
           Text('Line items', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           for (var i = 0; i < _lines.length; i++) ...[
@@ -412,16 +460,33 @@ class _BillReviewScreenState extends State<BillReviewScreen> {
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-          child: FilledButton(
-            onPressed: _save,
-            style: FilledButton.styleFrom(
-              backgroundColor: ZenthoColors.tealDeep,
-              foregroundColor: Colors.white,
-              minimumSize: const Size.fromHeight(48),
-            ),
-            child: Text(
-              'Add ${_lines.where((l) => l.selected && l.amount > 0).length} expense(s)',
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_printedTotalMismatches) ...[
+                _TotalReconciliationBanner(
+                  printedTotal: _printedTotal!,
+                  selectedSum: _selectedSum,
+                  delta: _printedTotalDelta ?? 0,
+                  currencyCode: _currency,
+                  money: _money,
+                  mismatch: true,
+                  compact: true,
+                ),
+                const SizedBox(height: 8),
+              ],
+              FilledButton(
+                onPressed: _save,
+                style: FilledButton.styleFrom(
+                  backgroundColor: ZenthoColors.tealDeep,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(48),
+                ),
+                child: Text(
+                  'Add ${_lines.where((l) => l.selected && l.amount > 0).length} expense(s)',
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -508,3 +573,88 @@ class _LineEditor extends StatelessWidget {
     );
   }
 }
+
+class _TotalReconciliationBanner extends StatelessWidget {
+  const _TotalReconciliationBanner({
+    required this.printedTotal,
+    required this.selectedSum,
+    required this.delta,
+    required this.currencyCode,
+    required this.money,
+    required this.mismatch,
+    this.compact = false,
+  });
+
+  final double printedTotal;
+  final double selectedSum;
+  final double delta;
+  final String currencyCode;
+  final String Function(double) money;
+  final bool mismatch;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final short = delta > 0;
+    final tone = mismatch ? ZenthoColors.amber : ZenthoColors.tealDeep;
+    final summary =
+        'Printed TOTAL ${money(printedTotal)} $currencyCode · '
+        'Selected ${money(selectedSum)} $currencyCode'
+        '${mismatch ? ' · ${money(delta.abs())} $currencyCode ${short ? 'short' : 'over'}' : ''}';
+
+    return Material(
+      key: compact
+          ? const Key('bill-total-mismatch')
+          : const Key('bill-total-reconciliation'),
+      color: tone.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: double.infinity,
+        padding: EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: compact ? 10 : 12,
+        ),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: tone.withValues(alpha: 0.55)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              mismatch
+                  ? Icons.warning_amber_rounded
+                  : Icons.check_circle_outline,
+              color: tone,
+              size: 22,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (!compact)
+                    Text(
+                      mismatch
+                          ? 'Line items do not match the printed TOTAL'
+                          : 'Line items match the printed TOTAL',
+                      style: theme.textTheme.titleSmall?.copyWith(color: tone),
+                    ),
+                  if (!compact) const SizedBox(height: 2),
+                  Text(
+                    compact
+                        ? 'Does not match printed TOTAL · $summary'
+                        : summary,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

@@ -203,6 +203,7 @@ class _TransactionEditorState extends State<_TransactionEditor> {
   late RecurrencePeriod _recurrencePeriod;
   late String _currency;
   late DateTime _date;
+  String? _amountError;
 
   bool get _isEditing => widget.existing != null;
 
@@ -244,16 +245,28 @@ class _TransactionEditorState extends State<_TransactionEditor> {
     super.dispose();
   }
 
+  String? _validateAmount(String raw) {
+    final amount = double.tryParse(raw.trim());
+    if (amount == null || amount <= 0) {
+      return 'Enter an amount greater than 0';
+    }
+    return null;
+  }
+
   Future<void> _save(FinanceRepository repo) async {
-    final amount = double.tryParse(_amount.text.trim());
-    if (amount == null ||
-        amount <= 0 ||
-        _accountId == null ||
-        _categoryId == null) {
+    final error = _validateAmount(_amount.text);
+    if (error != null) {
+      setState(() => _amountError = error);
       return;
     }
+    if (_accountId == null || _categoryId == null) {
+      setState(() => _amountError = 'Choose an account and category');
+      return;
+    }
+    final amount = double.parse(_amount.text.trim());
 
     final note = _note.text.trim();
+    String? createdId;
     if (_isEditing) {
       await repo.updateTransaction(
         widget.existing!.copyWith(
@@ -272,25 +285,38 @@ class _TransactionEditorState extends State<_TransactionEditor> {
         ),
       );
     } else {
-      await repo.addTransaction(
-        MoneyTransaction.create(
-          type: _type,
-          amount: amount,
-          currencyCode: _currency,
-          accountId: _accountId!,
-          categoryId: _categoryId,
-          date: _date,
-          ownerProfileId: repo.settings.activeProfileId,
-          visibility: _visibility,
-          note: note,
-          isRecurring: _recurring,
-          recurringLabel:
-              _recurring ? (note.isEmpty ? 'Recurring' : note) : null,
-          recurrencePeriod: _recurrencePeriod,
-        ),
+      final created = MoneyTransaction.create(
+        type: _type,
+        amount: amount,
+        currencyCode: _currency,
+        accountId: _accountId!,
+        categoryId: _categoryId,
+        date: _date,
+        ownerProfileId: repo.settings.activeProfileId,
+        visibility: _visibility,
+        note: note,
+        isRecurring: _recurring,
+        recurringLabel:
+            _recurring ? (note.isEmpty ? 'Recurring' : note) : null,
+        recurrencePeriod: _recurrencePeriod,
       );
+      await repo.addTransaction(created);
+      createdId = created.id;
     }
-    if (mounted) Navigator.pop(context);
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.pop(context);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(_isEditing ? 'Transaction updated' : 'Transaction saved'),
+        action: createdId == null
+            ? null
+            : SnackBarAction(
+                label: 'Undo',
+                onPressed: () => repo.deleteTransaction(createdId!),
+              ),
+      ),
+    );
   }
 
   @override
@@ -342,10 +368,16 @@ class _TransactionEditorState extends State<_TransactionEditor> {
           ),
           const SizedBox(height: 12),
           TextField(
+            key: const Key('transaction-amount'),
             controller: _amount,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onChanged: (_) {
+              if (_amountError == null) return;
+              setState(() => _amountError = _validateAmount(_amount.text));
+            },
             decoration: InputDecoration(
               labelText: 'Amount',
+              errorText: _amountError,
               suffixIcon: Padding(
                 padding: const EdgeInsets.only(right: 10),
                 child: DropdownButtonHideUnderline(
@@ -470,6 +502,7 @@ class _TransactionEditorState extends State<_TransactionEditor> {
           ),
           const SizedBox(height: 20),
           FilledButton(
+            key: const Key('transaction-save'),
             onPressed: () => _save(repo),
             child: Text(_isEditing ? 'Save changes' : 'Save'),
           ),

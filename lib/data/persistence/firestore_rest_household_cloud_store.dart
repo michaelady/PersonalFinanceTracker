@@ -3,7 +3,7 @@ import 'firestore_rest_client.dart';
 
 /// Anonymous household invite docs via Firestore REST (no Firebase Auth SDK).
 class FirestoreRestHouseholdCloudStore implements HouseholdCloudStore {
-  FirestoreRestHouseholdCloudStore({required FirestoreRestClient this._client});
+  FirestoreRestHouseholdCloudStore({required this._client});
 
   static const collectionId = 'households';
 

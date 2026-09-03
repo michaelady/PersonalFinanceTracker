@@ -5,7 +5,7 @@ import 'user_cloud_store.dart';
 /// Personal ledger via Firestore REST, authenticated with an Identity Toolkit
 /// ID token instead of the Android Firebase Auth SDK.
 class FirestoreRestUserCloudStore implements UserCloudStore {
-  FirestoreRestUserCloudStore({required FirestoreRestClient this._client});
+  FirestoreRestUserCloudStore({required this._client});
 
   final FirestoreRestClient _client;
 

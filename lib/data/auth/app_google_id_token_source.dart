@@ -11,7 +11,7 @@ import 'rest_google_auth_service.dart';
 class AppGoogleIdTokenSource implements GoogleIdTokenSource {
   AppGoogleIdTokenSource({
     required this.navigatorKey,
-    required IdentityToolkitClient this._toolkit,
+    required this._toolkit,
     GoogleSignIn? googleSignIn,
   }) : _googleSignIn = googleSignIn ?? GoogleSignIn.instance;
 

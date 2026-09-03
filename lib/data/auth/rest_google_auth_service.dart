@@ -15,8 +15,8 @@ abstract class GoogleIdTokenSource {
 /// SDK rejects the web `appId` with `INVALID_APP_ID`.
 class RestGoogleAuthService implements AuthService {
   RestGoogleAuthService({
-    required IdentityToolkitClient this._toolkit,
-    required GoogleIdTokenSource this._tokenSource,
+    required this._toolkit,
+    required this._tokenSource,
     AuthSessionStore? sessions,
   }) : _sessions = sessions ?? AuthSessionStore();
 

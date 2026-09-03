@@ -50,6 +50,15 @@ flutter run -d windows
 flutter run -d android
 ```
 
+## Install on a phone (APK)
+
+Most phones: download [`android-dist/Zentho-arm64.apk`](android-dist/Zentho-arm64.apk) (also produced by the **Build Android APK** GitHub Action). Open the file on the device and allow installs from that source if prompted.
+
+```bash
+./scripts/build-android-apk.sh
+```
+
+The release APK is signed with the Android debug key so you can sideload it. Use a real release keystore before Play Store. Google sign-in on Android needs the debug/upload SHA-1 registered on Firebase app `zentho-db83e`; everything else works unsigned-in.
 
 ## Test
 

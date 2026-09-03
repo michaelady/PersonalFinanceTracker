@@ -82,7 +82,7 @@ void main() {
 
     expect(device2.accounts, hasLength(1));
     expect(device2.accounts.single.name, 'Checking');
-    expect(device2.settings.onboardingComplete, isFalse);
+    expect(device2.settings.onboardingComplete, isTrue);
   });
 
   test('sign-out does not wipe local', () async {
@@ -154,6 +154,25 @@ void main() {
     expect(json.toString(), isNot(contains('secret-av')));
     expect(json.toString(), isNot(contains('secret-td')));
     expect(repo.finnhubToken, 'secret-finnhub');
+  });
+
+  test('sign-in on empty onboarding does not skip setup or upload', () async {
+    SharedPreferences.setMockInitialValues({});
+    final cloud = MemoryUserCloudStore();
+    final repo = FinanceRepository(
+      auth: FakeAuthService(),
+      userCloud: cloud,
+      refreshRatesOnInit: false,
+    );
+    await repo.init();
+    expect(repo.settings.onboardingComplete, isFalse);
+
+    await repo.signInWithGoogle();
+
+    expect(repo.signedInUser?.email, 'ada@example.com');
+    expect(repo.settings.onboardingComplete, isFalse);
+    expect(repo.accounts, isEmpty);
+    expect(cloud.docs, isEmpty);
   });
 
   test('signed-in local save also writes Firestore', () async {

@@ -113,5 +113,6 @@ void main() {
 
     expect(find.textContaining('household ledger'), findsOneWidget);
     expect(find.text('Enter Zentho'), findsOneWidget);
+    expect(find.text('Sign in with Google'), findsOneWidget);
   });
 }

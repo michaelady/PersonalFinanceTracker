@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../branding/zentho_logo.dart';
+import '../../data/auth/auth_service.dart';
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
 import '../../domain/services/supported_currencies.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/responsive.dart';
-import 'package:provider/provider.dart';
+import '../user/account_cloud_section.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -22,6 +24,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _balanceController = TextEditingController(text: '2500');
   String _currency = 'USD';
   bool _busy = false;
+  String? _prefilledFromUid;
 
   static const _currencies = SupportedCurrencies.codes;
 
@@ -58,8 +61,28 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (mounted) setState(() => _busy = false);
   }
 
+  void _prefillNameFromAccount(AuthUser? user) {
+    if (user == null || _prefilledFromUid == user.uid) return;
+    _prefilledFromUid = user.uid;
+    final name = user.displayName?.trim();
+    if (name == null || name.isEmpty) return;
+    final current = _nameController.text.trim();
+    if (current.isNotEmpty && current != 'You') return;
+    _nameController.text = name;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final repo = context.watch<FinanceRepository>();
+    final theme = Theme.of(context);
+    final user = repo.signedInUser;
+    if (user != null && _prefilledFromUid != user.uid) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _prefillNameFromAccount(repo.signedInUser);
+      });
+    }
+
     return AtmosphereBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -84,14 +107,34 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 const SizedBox(height: 28),
                 Text(
                   'Set up your household ledger',
-                  style: Theme.of(context).textTheme.headlineMedium,
+                  style: theme.textTheme.headlineMedium,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Local-first, offline-ready. Shared budgets with a private section for personal spending.',
-                  style: Theme.of(context).textTheme.bodyLarge,
+                  'Local-first, offline-ready. Sign in to sync a ledger you '
+                  'already keep online, or set up this device with shared '
+                  'budgets and a private section.',
+                  style: theme.textTheme.bodyLarge,
                 ),
                 const SizedBox(height: 28),
+                const AccountCloudSection(compact: true),
+                const SizedBox(height: 28),
+                Row(
+                  children: [
+                    const Expanded(child: Divider()),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        'Or set up this device',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: ZenthoColors.inkMuted,
+                        ),
+                      ),
+                    ),
+                    const Expanded(child: Divider()),
+                  ],
+                ),
+                const SizedBox(height: 20),
                 TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(labelText: 'Your name'),
@@ -142,10 +185,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'No cloud login. Data stays on this device. Investments arrive next.',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: ZenthoColors.inkMuted,
-                      ),
+                  'You can skip sign-in. Data stays on this device until you '
+                  'sign in from User.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: ZenthoColors.inkMuted,
+                  ),
                 ),
               ],
             ),

@@ -389,6 +389,10 @@ class FinanceRepository extends ChangeNotifier {
         _applyingUserCloud = true;
         _hydrate(remote.snapshot);
         _ensureSupportedCurrencies();
+        // Fresh devices should not sit on onboarding after loading a real ledger.
+        if (!settings.onboardingComplete && _hasUploadableLocal) {
+          settings = settings.copyWith(onboardingComplete: true);
+        }
         snapshotUpdatedAt = remote.updatedAt.toUtc();
         await _store.save(snapshot, updatedAt: snapshotUpdatedAt);
         lastCloudSyncedAt = snapshotUpdatedAt;

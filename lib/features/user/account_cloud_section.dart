@@ -5,8 +5,19 @@ import 'package:provider/provider.dart';
 import '../../data/repositories/finance_repository.dart';
 
 /// Google account + last-synced status. Does not block the rest of the app.
+///
+/// Used on User, Settings, and first-run onboarding so the same providers
+/// (currently Google) are offered everywhere.
 class AccountCloudSection extends StatelessWidget {
-  const AccountCloudSection({super.key});
+  const AccountCloudSection({
+    super.key,
+    this.compact = false,
+  });
+
+  /// Tighter copy for the first-run screen. Sign-in buttons stay the same.
+  final bool compact;
+
+  static const googleSignInLabel = 'Sign in with Google';
 
   @override
   Widget build(BuildContext context) {
@@ -17,12 +28,19 @@ class AccountCloudSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Account', style: theme.textTheme.titleLarge),
+        Text(
+          compact ? 'Sign in' : 'Account',
+          style: theme.textTheme.titleLarge,
+        ),
         const SizedBox(height: 8),
         Text(
-          'Sign in with Google to keep this ledger online across devices. '
-          'Unsigned-in use stays on this device. Household invite links are '
-          'separate and do not log you in.',
+          compact
+              ? 'Sign in with Google to load a ledger you already keep online, '
+                  'or skip and set up this device. The same accounts are on '
+                  'the User page later.'
+              : 'Sign in with Google to keep this ledger online across devices. '
+                  'Unsigned-in use stays on this device. Household invite links are '
+                  'separate and do not log you in.',
           style: theme.textTheme.bodyMedium,
         ),
         const SizedBox(height: 12),
@@ -69,7 +87,7 @@ class AccountCloudSection extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.login),
-              label: const Text('Sign in with Google'),
+              label: const Text(googleSignInLabel),
             ),
           ),
         ],

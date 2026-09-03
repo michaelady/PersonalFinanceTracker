@@ -4,7 +4,7 @@ Personal finance tracker with household budgets, multi-currency conversion, shar
 
 ## Highlights
 
-- Offline-first local storage (SharedPreferences). Optional **Google sign-in** stores the same ledger in Cloud Firestore so it syncs across devices
+- Offline-first local storage (SharedPreferences). Optional **Google sign-in** stores the same ledger in Cloud Firestore so it syncs across devices. New users can sign in on the first-run screen (same accounts as User / Settings).
 - Same-device household profiles with **Shared** / **Private** visibility
 - Main currency + per-account / per-transaction currency (**USD, EUR, GBP, JPY, CAD, AUD, CHF, RON**)
 - Online FX refresh at app/site start (Frankfurter → open.er-api fallback), offline defaults otherwise
@@ -23,7 +23,7 @@ Deployed automatically via GitHub Actions (`.github/workflows/deploy-web.yml`) o
 
 ## Accounts (Google / Firebase)
 
-Unsigned-in use stays fully local. Signing in with Google (Settings or User) writes `FinanceSnapshot` JSON to Firestore at `users/{uid}/data/snapshot` plus `updatedAt`. Quote API tokens and the quote cache stay on the device only.
+Unsigned-in use stays fully local. Signing in with Google (first-run setup, Settings, or User) writes `FinanceSnapshot` JSON to Firestore at `users/{uid}/data/snapshot` plus `updatedAt`. Quote API tokens and the quote cache stay on the device only.
 
 Household invite links (`?hh=` + `k=`, stored in Firestore `households/{id}`) are **not** identity and work without signing in.
 

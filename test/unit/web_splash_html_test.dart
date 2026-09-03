@@ -14,7 +14,7 @@ void main() {
     expect(html.contains('flt-glass-pane'), isTrue);
     expect(
       html.indexOf('id="zentho-splash"'),
-      lessThan(html.indexOf('flutter_bootstrap.js')),
+      lessThan(html.indexOf('src="flutter_bootstrap.js"')),
     );
     // Generated bootstrap is left as-is; a custom onEntrypointLoaded would
     // skip forwarding the Flutter build config to initializeEngine().

@@ -417,7 +417,7 @@ class FinanceRepository extends ChangeNotifier {
     try {
       await _auth.signInWithGoogle();
     } catch (e) {
-      accountSyncError = 'Google sign-in failed: $e';
+      accountSyncError = 'Google sign-in failed: ${signInErrorMessage(e)}';
       accountSyncing = false;
       notifyListeners();
       rethrow;

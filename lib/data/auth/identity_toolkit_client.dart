@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:http/http.dart' as http;
 
@@ -41,9 +42,28 @@ class IdentityToolkitClient {
     });
     final uri = json['authUri'] as String?;
     if (uri == null || uri.isEmpty) {
-      throw StateError('Google sign-in did not return an auth URL');
+      throw SignInException('Google sign-in did not return an auth URL');
     }
     return uri;
+  }
+
+  /// Direct Google implicit flow for the web OAuth client. Avoids a fake
+  /// identifier hint from [createGoogleAuthUri].
+  String buildGoogleAuthorizationUrl({String? nonce}) {
+    return Uri.https('accounts.google.com', '/o/oauth2/v2/auth', {
+      'client_id': DefaultFirebaseOptions.googleWebClientId,
+      'redirect_uri': authHandlerUrl,
+      'response_type': 'id_token',
+      'scope': 'openid email profile',
+      'nonce': nonce ?? randomAuthNonce(),
+      'prompt': 'select_account',
+    }).toString();
+  }
+
+  static String randomAuthNonce() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+    return base64Url.encode(bytes).replaceAll('=', '');
   }
 
   Future<IdentityToolkitSession> signInWithGoogleIdToken(String idToken) async {
@@ -72,7 +92,7 @@ class IdentityToolkitClient {
     final uid = json['user_id'] as String? ?? json['userId'] as String?;
     final expiresIn = json['expires_in'] as String? ?? json['expiresIn'] as String?;
     if (idToken == null || idToken.isEmpty || uid == null || uid.isEmpty) {
-      throw StateError('Could not refresh the signed-in session');
+      throw SignInException('Could not refresh the signed-in session');
     }
     return IdentityToolkitSession(
       uid: uid,
@@ -97,10 +117,10 @@ class IdentityToolkitClient {
   Map<String, dynamic> _decode(http.Response response) {
     final decoded = jsonDecode(response.body);
     if (decoded is! Map<String, dynamic>) {
-      throw StateError('Unexpected auth response');
+      throw SignInException('Unexpected auth response');
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError(_errorMessage(decoded));
+      throw SignInException(_errorMessage(decoded));
     }
     return decoded;
   }
@@ -167,7 +187,7 @@ class IdentityToolkitSession {
     final idToken = json['idToken'] as String?;
     final refresh = json['refreshToken'] as String?;
     if (uid == null || uid.isEmpty || idToken == null || refresh == null) {
-      throw StateError('Sign-in did not return a session');
+      throw SignInException('Sign-in did not return a session');
     }
     return IdentityToolkitSession(
       uid: uid,
@@ -200,20 +220,35 @@ class IdentityToolkitSession {
   }
 }
 
-/// Pulls a Google `id_token` out of the Firebase Auth handler redirect.
+/// Pulls a Google `id_token` out of a redirect URL (fragment or query).
 String? googleIdTokenFromRedirect(String url) {
-  final uri = Uri.tryParse(url);
-  if (uri == null) return null;
-  if (!uri.path.contains('/__/auth/handler')) return null;
-  final raw = uri.fragment.isNotEmpty ? uri.fragment : uri.query;
-  if (raw.isEmpty) return null;
-  final params = Uri.splitQueryString(raw);
+  final cleaned = url.trim().replaceAll('"', '');
+  if (cleaned.isEmpty) return null;
+  final params = _oauthParams(cleaned);
   final error = params['error'];
   if (error != null && error.isNotEmpty) {
     final description = params['error_description'] ?? error;
-    throw StateError('Google sign-in failed: $description');
+    throw SignInException(
+      description.replaceAll('+', ' '),
+    );
   }
   final token = params['id_token'];
-  if (token == null || token.isEmpty) return null;
-  return token;
+  if (token != null && token.isNotEmpty) return token;
+  return null;
+}
+
+Map<String, String> _oauthParams(String url) {
+  final params = <String, String>{};
+  final uri = Uri.tryParse(url);
+  if (uri != null) {
+    if (uri.fragment.isNotEmpty) {
+      params.addAll(Uri.splitQueryString(uri.fragment));
+    }
+    params.addAll(uri.queryParameters);
+  }
+  final hash = url.indexOf('#');
+  if (hash >= 0 && hash < url.length - 1) {
+    params.addAll(Uri.splitQueryString(url.substring(hash + 1)));
+  }
+  return params;
 }

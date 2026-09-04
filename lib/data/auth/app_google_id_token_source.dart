@@ -1,13 +1,15 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../features/auth/google_oauth_web_view.dart';
 import '../../firebase_options.dart';
+import 'auth_service.dart';
 import 'identity_toolkit_client.dart';
 import 'rest_google_auth_service.dart';
 
-/// Native Google Sign-In when Play services allow it; otherwise the Firebase
-/// web OAuth client inside an in-app browser.
+/// Native Google Sign-In when Play services allow it; on Android the web
+/// OAuth client inside an in-app browser (no SHA-1 / Android Firebase app).
 class AppGoogleIdTokenSource implements GoogleIdTokenSource {
   AppGoogleIdTokenSource({
     required this.navigatorKey,
@@ -22,11 +24,14 @@ class AppGoogleIdTokenSource implements GoogleIdTokenSource {
 
   @override
   Future<String> getIdToken() async {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return _webViewIdToken();
+    }
     try {
       return await _pluginIdToken();
     } on GoogleSignInException catch (e) {
       if (e.code == GoogleSignInExceptionCode.canceled) {
-        throw StateError('Google sign-in was cancelled');
+        throw const SignInException('Google sign-in was cancelled');
       }
       return _webViewIdToken();
     } catch (_) {
@@ -46,23 +51,32 @@ class AppGoogleIdTokenSource implements GoogleIdTokenSource {
     );
     final idToken = account.authentication.idToken;
     if (idToken == null || idToken.isEmpty) {
-      throw StateError('Google sign-in did not return an ID token');
+      throw const SignInException('Google sign-in did not return an ID token');
     }
     return idToken;
   }
 
   Future<String> _webViewIdToken() async {
     if (navigatorKey.currentState == null) {
-      throw StateError('Google sign-in is not ready yet. Try again.');
+      throw const SignInException('Google sign-in is not ready yet. Try again.');
     }
-    final authUri = await _toolkit.createGoogleAuthUri();
+    final authUri = _toolkit.buildGoogleAuthorizationUrl();
     final context = navigatorKey.currentContext;
     if (context == null || !context.mounted) {
-      throw StateError('Google sign-in is not ready yet. Try again.');
+      throw const SignInException('Google sign-in is not ready yet. Try again.');
     }
-    final token = await GoogleOauthWebView.open(context, authUri: authUri);
+    final outcome = await GoogleOauthWebView.open(context, authUri: authUri);
+    if (outcome == null || outcome.cancelled) {
+      throw const SignInException('Google sign-in was cancelled');
+    }
+    if (outcome.error != null) {
+      throw SignInException(outcome.error!);
+    }
+    final token = outcome.idToken;
     if (token == null || token.isEmpty) {
-      throw StateError('Google sign-in was cancelled');
+      throw const SignInException(
+        'Google sign-in did not finish. Try again.',
+      );
     }
     return token;
   }

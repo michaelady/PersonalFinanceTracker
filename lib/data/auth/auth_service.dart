@@ -34,6 +34,25 @@ abstract class AuthService {
   Future<void> signOut();
 }
 
+/// User-facing Google / cloud sign-in failure. [toString] is the message
+/// shown in the UI (no `Bad state:` prefix).
+class SignInException implements Exception {
+  const SignInException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+String signInErrorMessage(Object error) {
+  if (error is SignInException) return error.message;
+  final raw = error.toString();
+  for (final prefix in const ['Bad state: ', 'Exception: ']) {
+    if (raw.startsWith(prefix)) return raw.substring(prefix.length);
+  }
+  return raw;
+}
+
 /// Default: unsigned-in, fully local. Used by tests and when Firebase is off.
 class SignedOutAuthService implements AuthService {
   const SignedOutAuthService();

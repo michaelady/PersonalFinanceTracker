@@ -1,11 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zentho/data/auth/auth_service.dart';
 import 'package:zentho/data/auth/identity_toolkit_client.dart';
 import 'package:zentho/data/persistence/firestore_rest_codec.dart';
+import 'package:zentho/firebase_options.dart';
 
 void main() {
   test('googleIdTokenFromRedirect reads the Firebase handler fragment', () {
     const url =
         'https://zentho-db83e.firebaseapp.com/__/auth/handler#id_token=abc.def.ghi&state=xyz';
+    expect(googleIdTokenFromRedirect(url), 'abc.def.ghi');
+  });
+
+  test('googleIdTokenFromRedirect reads a quoted JS href', () {
+    const url =
+        '"https://zentho-db83e.firebaseapp.com/__/auth/handler#id_token=abc.def.ghi"';
     expect(googleIdTokenFromRedirect(url), 'abc.def.ghi');
   });
 
@@ -21,7 +29,38 @@ void main() {
       () => googleIdTokenFromRedirect(
         'https://zentho-db83e.firebaseapp.com/__/auth/handler#error=access_denied',
       ),
-      throwsA(isA<StateError>()),
+      throwsA(
+        isA<SignInException>().having(
+          (e) => e.message,
+          'message',
+          'access_denied',
+        ),
+      ),
+    );
+  });
+
+  test('buildGoogleAuthorizationUrl uses the web client and account picker', () {
+    final url = IdentityToolkitClient(apiKey: 'test-key')
+        .buildGoogleAuthorizationUrl(nonce: 'n1');
+    final uri = Uri.parse(url);
+    expect(uri.host, 'accounts.google.com');
+    expect(
+      uri.queryParameters['client_id'],
+      DefaultFirebaseOptions.googleWebClientId,
+    );
+    expect(uri.queryParameters['prompt'], 'select_account');
+    expect(uri.queryParameters['response_type'], 'id_token');
+    expect(uri.queryParameters['nonce'], 'n1');
+  });
+
+  test('signInErrorMessage strips Bad state prefix', () {
+    expect(
+      signInErrorMessage(StateError('Google sign-in was cancelled')),
+      'Google sign-in was cancelled',
+    );
+    expect(
+      signInErrorMessage(const SignInException('Could not finish')),
+      'Could not finish',
     );
   });
 

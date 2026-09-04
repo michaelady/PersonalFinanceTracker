@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../../data/auth/auth_service.dart';
 import '../../data/repositories/finance_repository.dart';
 
 /// Google account + last-synced status. Does not block the rest of the app.
@@ -133,7 +134,7 @@ class AccountCloudSection extends StatelessWidget {
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sign-in failed: $e')),
+        SnackBar(content: Text('Sign-in failed: ${signInErrorMessage(e)}')),
       );
     }
   }

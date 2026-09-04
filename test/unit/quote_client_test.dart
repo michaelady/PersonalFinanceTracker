@@ -49,6 +49,39 @@ void main() {
     expect(bundle.history.last.close, closeTo(325.13, 0.0001));
   });
 
+  test('Yahoo chart parser skips a dummy 0 close at the start of the series', () {
+    final bundle = YahooQuoteClient.parseChart(
+      {
+        'chart': {
+          'result': [
+            {
+              'meta': {
+                'currency': 'USD',
+                'symbol': 'AAPL',
+                'regularMarketPrice': 325.13,
+                'chartPreviousClose': 321.12,
+              },
+              'timestamp': [1725062400, 1725148800, 1725235200],
+              'indicators': {
+                'quote': [
+                  {
+                    'close': [0, 320.0, 325.13],
+                  },
+                ],
+              },
+            },
+          ],
+          'error': null,
+        },
+      },
+      ticker: 'AAPL',
+      range: QuoteHistoryRange.oneMonth,
+      fetchedAt: DateTime.utc(2026, 9, 2),
+    );
+    expect(bundle.history, hasLength(2));
+    expect(bundle.history.first.close, closeTo(320.0, 0.0001));
+  });
+
   test('Yahoo search parser maps quote results', () {
     final results = YahooQuoteClient.parseSearch({
       'quotes': [

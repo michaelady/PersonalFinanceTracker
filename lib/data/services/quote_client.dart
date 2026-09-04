@@ -144,7 +144,7 @@ class YahooQuoteClient implements QuoteClient {
       final n = timestamps.length < closes.length ? timestamps.length : closes.length;
       for (var i = 0; i < n; i++) {
         final close = closes[i];
-        if (close is num) {
+        if (close is num && close.toDouble() > 0) {
           history.add(
             PricePoint(
               date: DateTime.fromMillisecondsSinceEpoch(
@@ -417,7 +417,7 @@ class AlphaVantageHistoryClient {
     for (final entry in series.entries) {
       final date = _parseUtcDate(entry.key);
       final close = _parseClose(entry.value);
-      if (date == null || close == null) continue;
+      if (date == null || close == null || close <= 0) continue;
       out.add(PricePoint(date: date, close: close));
     }
     out.sort((a, b) => a.date.compareTo(b.date));
@@ -587,7 +587,7 @@ class TwelveDataHistoryClient {
       final map = Map<String, dynamic>.from(raw);
       final date = _parseUtcDate(map['datetime']?.toString() ?? '');
       final close = _parseClose(map['close']);
-      if (date == null || close == null) continue;
+      if (date == null || close == null || close <= 0) continue;
       out.add(PricePoint(date: date, close: close));
     }
     out.sort((a, b) => a.date.compareTo(b.date));
@@ -742,7 +742,7 @@ class FinnhubQuoteClient implements QuoteClient {
     for (var i = 0; i < n; i++) {
       final close = closes[i];
       final t = times[i];
-      if (close is num && t is num) {
+      if (close is num && t is num && close.toDouble() > 0) {
         out.add(
           PricePoint(
             date: DateTime.fromMillisecondsSinceEpoch(

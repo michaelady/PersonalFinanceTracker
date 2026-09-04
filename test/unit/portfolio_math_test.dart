@@ -344,5 +344,118 @@ void main() {
       expect(appleOnly.last.close, closeTo(220, 0.01));
       expect(appleOnly.last.close, isNot(closeTo(portfolio.last.close, 0.01)));
     });
+
+    test('performanceSeries starts at the first real market value, not 0', () {
+      final holding = lot(ticker: 'AAPL', shares: 2, cost: 100);
+      final quotes = {
+        'AAPL': quote(symbol: 'AAPL', price: 120).copyWith(
+          history: {
+            '1mo': [
+              PricePoint(date: DateTime.utc(2026, 8, 1), close: 0),
+              PricePoint(
+                date: DateTime.utc(2026, 8, 4, 13, 30),
+                close: 100,
+              ),
+              PricePoint(
+                date: DateTime.utc(2026, 8, 5, 13, 30),
+                close: 110,
+              ),
+            ],
+          },
+        ),
+      };
+      final series = PortfolioMath.performanceSeries(
+        holdings: [holding],
+        quotes: quotes,
+        mainCurrency: 'USD',
+        rates: rates,
+        range: QuoteHistoryRange.oneMonth,
+      );
+      expect(series, hasLength(2));
+      expect(series.first.close, closeTo(200, 0.01));
+      expect(series.first.date, DateTime.utc(2026, 8, 4));
+      expect(series.last.close, closeTo(220, 0.01));
+    });
+
+    test('performanceSeries omits days before the first shares are held', () {
+      final holding = lot(ticker: 'AAPL', shares: 2, cost: 100);
+      final txs = [
+        ShareTransaction.create(
+          holdingId: holding.id,
+          type: ShareTransactionType.dividend,
+          date: DateTime.utc(2026, 8, 1),
+          amount: 1,
+        ),
+        ShareTransaction.create(
+          holdingId: holding.id,
+          type: ShareTransactionType.buy,
+          date: DateTime.utc(2026, 8, 4),
+          shares: 2,
+          pricePerShare: 100,
+        ),
+      ];
+      final series = PortfolioMath.performanceSeries(
+        holdings: [holding],
+        shareTransactions: txs,
+        quotes: {
+          'AAPL': quote(symbol: 'AAPL', price: 120).copyWith(
+            history: {
+              '1mo': [
+                PricePoint(date: DateTime.utc(2026, 8, 1), close: 90),
+                PricePoint(date: DateTime.utc(2026, 8, 4), close: 100),
+                PricePoint(date: DateTime.utc(2026, 8, 5), close: 110),
+              ],
+            },
+          ),
+        },
+        mainCurrency: 'USD',
+        rates: rates,
+        range: QuoteHistoryRange.oneMonth,
+      );
+      expect(series, hasLength(2));
+      expect(series.first.close, closeTo(200, 0.01));
+      expect(series.first.date, DateTime.utc(2026, 8, 4));
+      expect(series.last.close, closeTo(220, 0.01));
+    });
+
+    test('performanceSeries merges same-day session and midnight closes', () {
+      final aapl = lot(ticker: 'AAPL', shares: 2, cost: 100);
+      final vwce = lot(ticker: 'VWCE.DE', shares: 1, cost: 50, currency: 'EUR');
+      final series = PortfolioMath.performanceSeries(
+        holdings: [aapl, vwce],
+        quotes: {
+          'AAPL': quote(symbol: 'AAPL', price: 120).copyWith(
+            history: {
+              '1mo': [
+                PricePoint(
+                  date: DateTime.utc(2026, 8, 4, 13, 30),
+                  close: 100,
+                ),
+                PricePoint(
+                  date: DateTime.utc(2026, 8, 5, 13, 30),
+                  close: 110,
+                ),
+              ],
+            },
+          ),
+          'VWCE.DE': quote(symbol: 'VWCE.DE', price: 60, currency: 'EUR')
+              .copyWith(
+            history: {
+              '1mo': [
+                PricePoint(date: DateTime.utc(2026, 8, 4), close: 50),
+                PricePoint(date: DateTime.utc(2026, 8, 5), close: 55),
+              ],
+            },
+          ),
+        },
+        mainCurrency: 'USD',
+        rates: rates,
+        range: QuoteHistoryRange.oneMonth,
+      );
+      expect(series, hasLength(2));
+      // Aug 4: 2*100 USD + 1*50 EUR*1.1 = 255, not a 0 then a spike.
+      expect(series.first.close, closeTo(255, 0.01));
+      expect(series.last.close, closeTo(280.5, 0.01));
+    });
   });
 }

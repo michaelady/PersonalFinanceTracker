@@ -773,9 +773,19 @@ abstract final class PortfolioMath {
     ];
   }
 
+  /// UTC calendar day so Yahoo session timestamps and daily midnights align.
+  static DateTime calendarDayUtc(DateTime date) {
+    final utc = date.toUtc();
+    return DateTime.utc(utc.year, utc.month, utc.day);
+  }
+
   /// Portfolio (or single holding) market value in main currency over time.
   /// Uses current FX rates as a bridge — not historical FX. Share quantity on
   /// each day comes from the transaction ledger when present.
+  ///
+  /// The series starts on the first day with a real market value — leading
+  /// zeros from empty lots or a dummy 0 close are dropped so the Y axis
+  /// scales around the holding, not around 0.
   static List<PricePoint> performanceSeries({
     required List<InvestmentHolding> holdings,
     required Map<String, CachedQuote> quotes,
@@ -792,7 +802,7 @@ abstract final class PortfolioMath {
       final points = historyForRange(quoteFor(h, quotes), range);
       if (points.isEmpty) continue;
       seriesByTicker[h.ticker] = points;
-      dates.addAll(points.map((p) => p.date));
+      dates.addAll(points.map((p) => calendarDayUtc(p.date)));
     }
     if (dates.isEmpty) return const [];
 
@@ -808,8 +818,10 @@ abstract final class PortfolioMath {
         final series = seriesByTicker[h.ticker];
         if (series == null) continue;
         var i = dateIndex[h.ticker]!;
-        while (i < series.length && !series[i].date.isAfter(day)) {
-          lastClose[h.ticker] = series[i].close;
+        while (i < series.length &&
+            !calendarDayUtc(series[i].date).isAfter(day)) {
+          final close = series[i].close;
+          if (close > 0) lastClose[h.ticker] = close;
           i++;
         }
         dateIndex[h.ticker] = i;
@@ -818,7 +830,7 @@ abstract final class PortfolioMath {
       var any = false;
       for (final h in holdings) {
         final close = lastClose[h.ticker];
-        if (close == null) continue;
+        if (close == null || close <= 0) continue;
         final quote = quoteFor(h, quotes);
         final currency = quote?.currency ?? h.currencyCode;
         final shares = sharesOnDate(
@@ -826,6 +838,7 @@ abstract final class PortfolioMath {
           asOf: day,
           transactions: shareTransactions,
         );
+        if (shares.abs() <= qtyEpsilon) continue;
         total += toMain(shares * close, currency, mainCurrency, rates);
         any = true;
       }
@@ -833,7 +846,9 @@ abstract final class PortfolioMath {
         out.add(PricePoint(date: day, close: total));
       }
     }
-    return out;
+    final start = out.indexWhere((p) => p.close > qtyEpsilon);
+    if (start < 0) return const [];
+    return start == 0 ? out : out.sublist(start);
   }
 
   /// Re-export so tests can use the same FX helper as the rest of Zentho.

@@ -727,6 +727,7 @@ class _PerformanceChart extends StatelessWidget {
                       FlSpot(i.toDouble(), series[i].close),
                   ],
                   isCurved: true,
+                  preventCurveOverShooting: true,
                   color: ZenthoColors.tealDeep,
                   barWidth: 2.4,
                   dotData: const FlDotData(show: false),

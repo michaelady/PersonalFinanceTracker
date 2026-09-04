@@ -1,4 +1,6 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -280,5 +282,39 @@ void main() {
       ),
       isTrue,
     );
+  });
+
+  testWidgets('dashboard cash-flow labels are fully visible under the bars',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHousehold();
+
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FinanceRepository>.value(
+        value: repo,
+        child: const MaterialApp(home: AppShell()),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Income'), findsOneWidget);
+    expect(find.text('Spend'), findsOneWidget);
+
+    final chart = tester.widget<BarChart>(find.byType(BarChart));
+    expect(
+      chart.data.titlesData.bottomTitles.sideTitles.reservedSize,
+      greaterThanOrEqualTo(36),
+    );
+
+    for (final label in ['Income', 'Spend']) {
+      final paragraph = tester.renderObject<RenderParagraph>(find.text(label));
+      expect(paragraph.hasVisualOverflow, isFalse, reason: '$label clipped');
+      expect(paragraph.size.height, greaterThanOrEqualTo(16));
+    }
   });
 }

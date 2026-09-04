@@ -114,10 +114,11 @@ class _HeroFlowChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final maxY = [income, expense, 1.0].reduce((a, b) => a > b ? a : b) * 1.2;
     return SizedBox(
-      height: 190,
+      height: 210,
       child: BarChart(
         BarChartData(
           maxY: maxY,
+          alignment: BarChartAlignment.spaceAround,
           gridData: const FlGridData(show: false),
           borderData: FlBorderData(show: false),
           titlesData: FlTitlesData(
@@ -130,10 +131,13 @@ class _HeroFlowChart extends StatelessWidget {
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
-                getTitlesWidget: (value, _) {
-                  final label = value == 0 ? 'Income' : 'Spend';
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 8),
+                reservedSize: 40,
+                interval: 1,
+                getTitlesWidget: (value, meta) {
+                  final label = value.round() == 0 ? 'Income' : 'Spend';
+                  return SideTitleWidget(
+                    meta: meta,
+                    space: 8,
                     child: Text(label),
                   );
                 },

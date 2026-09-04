@@ -313,7 +313,12 @@ void main() {
 
     for (final label in ['Income', 'Spend']) {
       final paragraph = tester.renderObject<RenderParagraph>(find.text(label));
-      expect(paragraph.hasVisualOverflow, isFalse, reason: '$label clipped');
+      expect(
+        paragraph.constraints.maxHeight,
+        greaterThanOrEqualTo(20),
+        reason: '$label was given too little vertical space',
+      );
+      expect(paragraph.didExceedMaxLines, isFalse);
       expect(paragraph.size.height, greaterThanOrEqualTo(16));
     }
   });

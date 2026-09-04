@@ -109,6 +109,42 @@ void main() {
     expect(find.text('Delete'), findsOneWidget);
   });
 
+  testWidgets('edit sheet Delete stays above the Android navigation inset',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedReady();
+
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1;
+    tester.view.viewPadding = const FakeViewPadding(bottom: 48);
+    tester.view.padding = const FakeViewPadding(bottom: 48);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewPadding);
+    addTearDown(tester.view.resetPadding);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FinanceRepository>.value(
+        value: repo,
+        child: const MaterialApp(home: AppShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Activity'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Groceries'));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('Delete'));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.getRect(find.text('Delete')).bottom,
+      lessThanOrEqualTo(900 - 48 + 0.5),
+    );
+  });
+
   testWidgets('repository updateTransaction persists field changes',
       (tester) async {
     final repo = MemoryStoreRepo();

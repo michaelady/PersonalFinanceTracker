@@ -15,6 +15,7 @@ import '../../domain/services/supported_currencies.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/money_text.dart';
 import '../../widgets/responsive.dart';
+import '../../widgets/sheet_inset.dart';
 import '../../widgets/visibility_chip.dart';
 
 String performanceEmptyCopy({required bool hasLastPrice}) {
@@ -40,10 +41,7 @@ class InvestmentsScreen extends StatefulWidget {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom,
-        ),
+      builder: (context) => SheetInset(
         child: _HoldingEditor(existing: existing),
       ),
     );
@@ -59,10 +57,7 @@ class InvestmentsScreen extends StatefulWidget {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom,
-        ),
+      builder: (context) => SheetInset(
         child: _ShareTransactionEditor(
           existing: existing,
           initialHolding: holding,
@@ -1077,6 +1072,7 @@ class _HoldingEditorState extends State<_HoldingEditor> {
     final hasLedger = widget.existing != null &&
         repo.shareTransactions.any((t) => t.holdingId == widget.existing!.id);
     return SafeArea(
+      bottom: false,
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         child: Column(
@@ -1505,6 +1501,7 @@ class _ShareTransactionEditorState extends State<_ShareTransactionEditor> {
   Widget build(BuildContext context) {
     final repo = context.watch<FinanceRepository>();
     return SafeArea(
+      bottom: false,
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         child: Column(

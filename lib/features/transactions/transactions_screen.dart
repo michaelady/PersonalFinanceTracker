@@ -9,6 +9,7 @@ import '../../domain/services/supported_currencies.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/money_text.dart';
 import '../../widgets/responsive.dart';
+import '../../widgets/sheet_inset.dart';
 import '../../widgets/visibility_chip.dart';
 import '../bills/bill_scan_flow.dart';
 
@@ -71,10 +72,7 @@ class TransactionsScreen extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom,
-        ),
+      builder: (context) => SheetInset(
         child: _TransactionEditor(existing: existing),
       ),
     );

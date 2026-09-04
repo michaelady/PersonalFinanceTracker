@@ -2,7 +2,6 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../branding/zentho_logo.dart';
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
 import '../../domain/services/money_math.dart';
@@ -26,7 +25,8 @@ class ReportsScreen extends StatelessWidget {
           MoneyMath.monthKey(t.date) == month,
     )) {
       final key = tx.categoryId ?? 'other';
-      byCategory[key] = (byCategory[key] ?? 0) +
+      byCategory[key] =
+          (byCategory[key] ?? 0) +
           MoneyMath.toMain(
             amount: tx.amount,
             currencyCode: tx.currencyCode,
@@ -40,90 +40,86 @@ class ReportsScreen extends StatelessWidget {
       ..sort((a, b) => b.value.compareTo(a.value));
     final total = entries.fold<double>(0, (s, e) => s + e.value);
 
-    return AtmosphereBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(title: const Text('Reports')),
-        body: AppScaffoldBody(
-          child: ListView(
-            children: [
-              Text(
-                'Spend by category',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Month $month · totals in $currency',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 20),
-              if (entries.isEmpty)
-                const Text('No expenses to chart yet.')
-              else ...[
-                SizedBox(
-                  height: 220,
-                  child: PieChart(
-                    PieChartData(
-                      sectionsSpace: 2,
-                      centerSpaceRadius: 48,
-                      sections: [
-                        for (var i = 0; i < entries.length; i++)
-                          PieChartSectionData(
-                            value: entries[i].value,
-                            title: total == 0
-                                ? ''
-                                : '${((entries[i].value / total) * 100).round()}%',
-                            radius: 56,
-                            color: _colorAt(i),
-                            titleStyle: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
-                            ),
+    return AppScaffoldBody(
+      child: Material(
+        color: Colors.transparent,
+        child: ListView(
+          children: [
+            Text('Reports', style: Theme.of(context).textTheme.headlineMedium),
+            const SizedBox(height: 4),
+            Text(
+              'Spend by category',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Month $month · totals in $currency',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 20),
+            if (entries.isEmpty)
+              const Text('No expenses to chart yet.')
+            else ...[
+              SizedBox(
+                height: 220,
+                child: PieChart(
+                  PieChartData(
+                    sectionsSpace: 2,
+                    centerSpaceRadius: 48,
+                    sections: [
+                      for (var i = 0; i < entries.length; i++)
+                        PieChartSectionData(
+                          value: entries[i].value,
+                          title: total == 0
+                              ? ''
+                              : '${((entries[i].value / total) * 100).round()}%',
+                          radius: 56,
+                          color: _colorAt(i),
+                          titleStyle: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
                           ),
-                      ],
-                    ),
+                        ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                ...entries.map((e) {
-                  final category = repo.categories
-                      .where((c) => c.id == e.key)
-                      .firstOrNull;
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(category?.name ?? 'Other'),
-                    trailing: MoneyText(e.value, currencyCode: currency),
-                  );
-                }),
-              ],
-              const SizedBox(height: 24),
-              Text(
-                'Cash flow',
-                style: Theme.of(context).textTheme.headlineSmall,
               ),
-              const SizedBox(height: 8),
-              MoneyText(
-                MoneyMath.incomeInMonthMain(
-                      transactions: repo.visibleTransactions,
-                      monthKeyValue: month,
-                      mainCurrency: currency,
-                      rates: repo.rates,
-                      includeExpectedRecurring: true,
-                    ) -
-                    MoneyMath.expenseInMonthMain(
-                      transactions: repo.visibleTransactions,
-                      monthKeyValue: month,
-                      mainCurrency: currency,
-                      rates: repo.rates,
-                      includeExpectedRecurring: true,
-                    ),
-                currencyCode: currency,
-                signed: true,
-                emphasize: true,
-              ),
+              const SizedBox(height: 16),
+              ...entries.map((e) {
+                final category = repo.categories
+                    .where((c) => c.id == e.key)
+                    .firstOrNull;
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(category?.name ?? 'Other'),
+                  trailing: MoneyText(e.value, currencyCode: currency),
+                );
+              }),
             ],
-          ),
+            const SizedBox(height: 24),
+            Text('Cash flow', style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(height: 8),
+            MoneyText(
+              MoneyMath.incomeInMonthMain(
+                    transactions: repo.visibleTransactions,
+                    monthKeyValue: month,
+                    mainCurrency: currency,
+                    rates: repo.rates,
+                    includeExpectedRecurring: true,
+                  ) -
+                  MoneyMath.expenseInMonthMain(
+                    transactions: repo.visibleTransactions,
+                    monthKeyValue: month,
+                    mainCurrency: currency,
+                    rates: repo.rates,
+                    includeExpectedRecurring: true,
+                  ),
+              currencyCode: currency,
+              signed: true,
+              emphasize: true,
+            ),
+          ],
         ),
       ),
     );

@@ -201,7 +201,15 @@ class SettingsScreen extends StatelessWidget {
                 title: const Text('Reports'),
                 onTap: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const ReportsScreen()),
+                  MaterialPageRoute(
+                    builder: (_) => AtmosphereBackground(
+                      child: Scaffold(
+                        backgroundColor: Colors.transparent,
+                        appBar: AppBar(title: const Text('Reports')),
+                        body: const ReportsScreen(),
+                      ),
+                    ),
+                  ),
                 ),
               ),
               ListTile(

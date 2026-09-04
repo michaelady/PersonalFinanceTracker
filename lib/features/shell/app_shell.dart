@@ -28,6 +28,7 @@ class _AppShellState extends State<AppShell> {
   static const _destinations = [
     (Icons.dashboard_outlined, Icons.dashboard, 'Home'),
     (Icons.swap_horiz_outlined, Icons.swap_horiz, 'Activity'),
+    (Icons.insights_outlined, Icons.insights, 'Reports'),
     (Icons.pie_chart_outline, Icons.pie_chart, 'Budgets'),
     (Icons.flag_outlined, Icons.flag, 'Goals'),
     (Icons.show_chart_outlined, Icons.show_chart, 'Invest'),
@@ -36,6 +37,7 @@ class _AppShellState extends State<AppShell> {
   late final List<Widget> _pages = const [
     DashboardScreen(),
     TransactionsScreen(),
+    ReportsScreen(),
     BudgetsScreen(),
     GoalsScreen(),
     InvestmentsScreen(),
@@ -59,10 +61,6 @@ class _AppShellState extends State<AppShell> {
                 TextButton(
                   onPressed: () => _openExtra(context, const AccountsScreen()),
                   child: const Text('Accounts'),
-                ),
-                TextButton(
-                  onPressed: () => _openExtra(context, const ReportsScreen()),
-                  child: const Text('Reports'),
                 ),
               ],
               IconButton(
@@ -131,16 +129,15 @@ class _AppShellState extends State<AppShell> {
                 icon: const Icon(Icons.add),
                 label: const Text('Add'),
               )
-            : _index == 4
-                ? FloatingActionButton.extended(
-                    onPressed: () =>
-                        InvestmentsScreen.showEditor(context, repo),
-                    backgroundColor: ZenthoColors.tealDeep,
-                    foregroundColor: Colors.white,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Holding'),
-                  )
-                : null,
+            : _index == 5
+            ? FloatingActionButton.extended(
+                onPressed: () => InvestmentsScreen.showEditor(context, repo),
+                backgroundColor: ZenthoColors.tealDeep,
+                foregroundColor: Colors.white,
+                icon: const Icon(Icons.add),
+                label: const Text('Holding'),
+              )
+            : null,
       ),
     );
   }
@@ -148,10 +145,8 @@ class _AppShellState extends State<AppShell> {
   void _openExtra(BuildContext context, Widget page) {
     Navigator.of(context).push(
       PageRouteBuilder(
-        pageBuilder: (_, animation, _) => FadeTransition(
-          opacity: animation,
-          child: page,
-        ),
+        pageBuilder: (_, animation, _) =>
+            FadeTransition(opacity: animation, child: page),
         transitionDuration: const Duration(milliseconds: 250),
       ),
     );

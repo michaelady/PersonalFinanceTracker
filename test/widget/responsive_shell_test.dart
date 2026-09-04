@@ -75,6 +75,31 @@ void main() {
 
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.text('Available to spend'), findsOneWidget);
+    expect(find.text('Reports'), findsOneWidget);
+  });
+
+  testWidgets('phone bottom bar opens Reports', (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedReady();
+
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FinanceRepository>.value(
+        value: repo,
+        child: const MaterialApp(home: AppShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Reports'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Spend by category'), findsOneWidget);
+    expect(find.text('Cash flow'), findsOneWidget);
   });
 
   testWidgets('desktop layout uses navigation rail', (tester) async {

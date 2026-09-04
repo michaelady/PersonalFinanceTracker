@@ -1,5 +1,6 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/repositories/finance_repository.dart';
@@ -42,16 +43,12 @@ class DashboardScreen extends StatelessWidget {
         children: [
           Text(
             'Available to spend',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: ZenthoColors.inkMuted,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(color: ZenthoColors.inkMuted),
           ),
           const SizedBox(height: 6),
-          MoneyText(
-            available,
-            currencyCode: currency,
-            emphasize: true,
-          ),
+          MoneyText(available, currencyCode: currency, emphasize: true),
           const SizedBox(height: 8),
           Text(
             'This month’s calm number — income minus expenses, including '
@@ -59,7 +56,7 @@ class DashboardScreen extends StatelessWidget {
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 24),
-          _HeroFlowChart(income: income, expense: expense),
+          _HeroFlowChart(income: income, expense: expense, currency: currency),
           const SizedBox(height: 28),
           Row(
             children: [
@@ -82,7 +79,10 @@ class DashboardScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 28),
-          Text('Recent activity', style: Theme.of(context).textTheme.titleLarge),
+          Text(
+            'Recent activity',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
           const SizedBox(height: 12),
           if (recent.isEmpty)
             Text(
@@ -92,10 +92,7 @@ class DashboardScreen extends StatelessWidget {
           else
             ...recent.map((tx) => _TxRow(tx: tx, repo: repo)),
           const SizedBox(height: 20),
-          Text(
-            'Investments',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
+          Text('Investments', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           _InvestmentsPreview(repo: repo, currency: currency),
         ],
@@ -105,43 +102,107 @@ class DashboardScreen extends StatelessWidget {
 }
 
 class _HeroFlowChart extends StatelessWidget {
-  const _HeroFlowChart({required this.income, required this.expense});
+  const _HeroFlowChart({
+    required this.income,
+    required this.expense,
+    required this.currency,
+  });
 
   final double income;
   final double expense;
+  final String currency;
+
+  String _compact(double value) {
+    final compact = NumberFormat.compact().format(value.abs());
+    return '$currency $compact';
+  }
 
   @override
   Widget build(BuildContext context) {
     final maxY = [income, expense, 1.0].reduce((a, b) => a > b ? a : b) * 1.2;
+    final interval = maxY / 4;
+    final labelStyle = Theme.of(context).textTheme.labelSmall;
     return SizedBox(
-      height: 210,
+      height: 236,
       child: BarChart(
         BarChartData(
+          minY: 0,
           maxY: maxY,
           alignment: BarChartAlignment.spaceAround,
-          gridData: const FlGridData(show: false),
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: false,
+            horizontalInterval: interval,
+            getDrawingHorizontalLine: (_) => FlLine(
+              color: ZenthoColors.line.withValues(alpha: 0.7),
+              strokeWidth: 1,
+            ),
+          ),
           borderData: FlBorderData(show: false),
           titlesData: FlTitlesData(
-            leftTitles:
-                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles:
-                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            topTitles:
-                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            bottomTitles: AxisTitles(
+            rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            leftTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
-                reservedSize: 40,
-                interval: 1,
+                reservedSize: 42,
+                interval: interval,
                 getTitlesWidget: (value, meta) {
-                  final label = value.round() == 0 ? 'Income' : 'Spend';
                   return SideTitleWidget(
                     meta: meta,
-                    space: 8,
-                    child: Text(label),
+                    space: 4,
+                    child: Text(
+                      NumberFormat.compact().format(value),
+                      style: labelStyle,
+                    ),
                   );
                 },
               ),
+            ),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 52,
+                interval: 1,
+                getTitlesWidget: (value, meta) {
+                  final isIncome = value.round() == 0;
+                  final label = isIncome ? 'Income' : 'Spend';
+                  final amount = isIncome ? income : expense;
+                  return SideTitleWidget(
+                    meta: meta,
+                    space: 8,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          label,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        Text(_compact(amount), style: labelStyle),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          barTouchData: BarTouchData(
+            enabled: true,
+            touchTooltipData: BarTouchTooltipData(
+              getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                final isIncome = group.x == 0;
+                return BarTooltipItem(
+                  '${isIncome ? 'Income' : 'Spend'}\n${_compact(rod.toY)}',
+                  const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                );
+              },
             ),
           ),
           barGroups: [
@@ -219,10 +280,10 @@ class _TxRow extends StatelessWidget {
       rates: repo.rates,
       overrideRate: tx.exchangeRateToMain,
     );
-    final signedNative =
-        tx.type == TransactionType.expense ? -tx.amount : tx.amount;
-    final signedMain =
-        tx.type == TransactionType.expense ? -inMain : inMain;
+    final signedNative = tx.type == TransactionType.expense
+        ? -tx.amount
+        : tx.amount;
+    final signedMain = tx.type == TransactionType.expense ? -inMain : inMain;
     final foreign = tx.currencyCode != repo.settings.mainCurrency;
     return InkWell(
       borderRadius: BorderRadius.circular(12),

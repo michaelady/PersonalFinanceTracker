@@ -306,6 +306,8 @@ void main() {
     expect(find.text('Spend'), findsOneWidget);
 
     final chart = tester.widget<BarChart>(find.byType(BarChart));
+    expect(chart.data.titlesData.leftTitles.sideTitles.showTitles, isTrue);
+    expect(chart.data.gridData.show, isTrue);
     expect(
       chart.data.titlesData.bottomTitles.sideTitles.reservedSize,
       greaterThanOrEqualTo(36),

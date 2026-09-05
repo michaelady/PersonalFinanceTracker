@@ -779,13 +779,21 @@ abstract final class PortfolioMath {
     return DateTime.utc(utc.year, utc.month, utc.day);
   }
 
+  /// Inclusive end of [date]'s UTC calendar day, so a daily close includes
+  /// buys booked later that session (not only those at midnight).
+  static DateTime endOfCalendarDayUtc(DateTime date) {
+    final day = calendarDayUtc(date);
+    return DateTime.utc(day.year, day.month, day.day, 23, 59, 59, 999);
+  }
+
   /// Portfolio (or single holding) market value in main currency over time.
   /// Uses current FX rates as a bridge — not historical FX. Share quantity on
   /// each day comes from the transaction ledger when present.
   ///
-  /// The series starts on the first day with a real market value — leading
-  /// zeros from empty lots or a dummy 0 close are dropped so the Y axis
-  /// scales around the holding, not around 0.
+  /// The series starts on the first day with a real, complete market value —
+  /// leading zeros, dummy 0 closes, and days that only price a subset of the
+  /// book are dropped so the Y axis scales around the holding, not a spike
+  /// up from one ticker's first bar.
   static List<PricePoint> performanceSeries({
     required List<InvestmentHolding> holdings,
     required Map<String, CachedQuote> quotes,
@@ -799,7 +807,9 @@ abstract final class PortfolioMath {
     final seriesByTicker = <String, List<PricePoint>>{};
     final dates = <DateTime>{};
     for (final h in holdings) {
-      final points = historyForRange(quoteFor(h, quotes), range);
+      final points = [
+        ...historyForRange(quoteFor(h, quotes), range),
+      ]..sort((a, b) => a.date.compareTo(b.date));
       if (points.isEmpty) continue;
       seriesByTicker[h.ticker] = points;
       dates.addAll(points.map((p) => calendarDayUtc(p.date)));
@@ -828,21 +838,35 @@ abstract final class PortfolioMath {
       }
       var total = 0.0;
       var any = false;
+      var incomplete = false;
+      final asOf = endOfCalendarDayUtc(day);
       for (final h in holdings) {
-        final close = lastClose[h.ticker];
-        if (close == null || close <= 0) continue;
-        final quote = quoteFor(h, quotes);
-        final currency = quote?.currency ?? h.currencyCode;
         final shares = sharesOnDate(
           holding: h,
-          asOf: day,
+          asOf: asOf,
           transactions: shareTransactions,
         );
         if (shares.abs() <= qtyEpsilon) continue;
+        final close = lastClose[h.ticker];
+        if (close == null || close <= 0) {
+          // A held lot whose daily history has not started yet would
+          // understate the book (first-day spike from ~10K to the real
+          // ~100K). Two-point previous-close fallbacks must not block
+          // earlier days — they only have yesterday + today.
+          final quote = quoteFor(h, quotes);
+          if (seriesByTicker.containsKey(h.ticker) &&
+              !usesLastCloseFallback(quote, range)) {
+            incomplete = true;
+            break;
+          }
+          continue;
+        }
+        final quote = quoteFor(h, quotes);
+        final currency = quote?.currency ?? h.currencyCode;
         total += toMain(shares * close, currency, mainCurrency, rates);
         any = true;
       }
-      if (any) {
+      if (!incomplete && any) {
         out.add(PricePoint(date: day, close: total));
       }
     }

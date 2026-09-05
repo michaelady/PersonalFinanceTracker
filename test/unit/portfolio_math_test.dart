@@ -457,5 +457,121 @@ void main() {
       expect(series.first.close, closeTo(255, 0.01));
       expect(series.last.close, closeTo(280.5, 0.01));
     });
+
+    test('performanceSeries skips days that only price part of the book', () {
+      final aapl = lot(ticker: 'AAPL', shares: 2, cost: 100);
+      final vwce = lot(ticker: 'VWCE.DE', shares: 100, cost: 50, currency: 'EUR');
+      final series = PortfolioMath.performanceSeries(
+        holdings: [aapl, vwce],
+        quotes: {
+          'AAPL': quote(symbol: 'AAPL', price: 120).copyWith(
+            history: {
+              '1mo': [
+                PricePoint(date: DateTime.utc(2026, 8, 4), close: 100),
+                PricePoint(date: DateTime.utc(2026, 8, 5), close: 110),
+                PricePoint(date: DateTime.utc(2026, 8, 6), close: 110),
+              ],
+            },
+          ),
+          'VWCE.DE': quote(symbol: 'VWCE.DE', price: 60, currency: 'EUR')
+              .copyWith(
+            history: {
+              '1mo': [
+                PricePoint(date: DateTime.utc(2026, 8, 5), close: 50),
+                PricePoint(date: DateTime.utc(2026, 8, 6), close: 55),
+              ],
+            },
+          ),
+        },
+        mainCurrency: 'USD',
+        rates: rates,
+        range: QuoteHistoryRange.oneMonth,
+      );
+      // Aug 4 would be 2*100 = 200 while the real book is ~5.7K.
+      expect(series, hasLength(2));
+      expect(series.first.date, DateTime.utc(2026, 8, 5));
+      expect(series.first.close, closeTo(2 * 110 + 100 * 50 * 1.1, 0.01));
+      expect(series.last.close, closeTo(2 * 110 + 100 * 55 * 1.1, 0.01));
+    });
+
+    test('performanceSeries counts same-day buys after midnight UTC', () {
+      final aapl = lot(ticker: 'AAPL', shares: 2, cost: 100);
+      final vwce = lot(ticker: 'VWCE.DE', shares: 100, cost: 50, currency: 'EUR');
+      final txs = [
+        ShareTransaction.create(
+          holdingId: aapl.id,
+          type: ShareTransactionType.buy,
+          date: DateTime.utc(2026, 8, 4, 15, 30),
+          shares: 2,
+          pricePerShare: 100,
+        ),
+        ShareTransaction.create(
+          holdingId: vwce.id,
+          type: ShareTransactionType.buy,
+          date: DateTime.utc(2026, 8, 4, 15, 30),
+          shares: 100,
+          pricePerShare: 50,
+        ),
+      ];
+      final series = PortfolioMath.performanceSeries(
+        holdings: [aapl, vwce],
+        shareTransactions: txs,
+        quotes: {
+          'AAPL': quote(symbol: 'AAPL', price: 120).copyWith(
+            history: {
+              '1mo': [
+                PricePoint(date: DateTime.utc(2026, 8, 4), close: 100),
+                PricePoint(date: DateTime.utc(2026, 8, 5), close: 110),
+              ],
+            },
+          ),
+          'VWCE.DE': quote(symbol: 'VWCE.DE', price: 60, currency: 'EUR')
+              .copyWith(
+            history: {
+              '1mo': [
+                PricePoint(date: DateTime.utc(2026, 8, 4), close: 50),
+                PricePoint(date: DateTime.utc(2026, 8, 5), close: 55),
+              ],
+            },
+          ),
+        },
+        mainCurrency: 'USD',
+        rates: rates,
+        range: QuoteHistoryRange.oneMonth,
+      );
+      expect(series.first.date, DateTime.utc(2026, 8, 4));
+      expect(series.first.close, closeTo(2 * 100 + 100 * 50 * 1.1, 0.01));
+      expect(series.last.close, closeTo(2 * 110 + 100 * 55 * 1.1, 0.01));
+    });
+
+    test('two-point fallback lots do not hide earlier daily history', () {
+      final aapl = lot(ticker: 'AAPL', shares: 2, cost: 100);
+      final smtc = lot(ticker: 'SMTC', shares: 1, cost: 130);
+      final smtcQuote = quote(
+        symbol: 'SMTC',
+        price: 132.27,
+        previousClose: 130,
+      );
+      final series = PortfolioMath.performanceSeries(
+        holdings: [aapl, smtc],
+        quotes: {
+          'AAPL': quote(symbol: 'AAPL', price: 120).copyWith(
+            history: {
+              '1mo': [
+                PricePoint(date: DateTime.utc(2026, 8, 1), close: 100),
+                PricePoint(date: DateTime.utc(2026, 8, 2), close: 110),
+              ],
+            },
+          ),
+          'SMTC': smtcQuote,
+        },
+        mainCurrency: 'USD',
+        rates: rates,
+        range: QuoteHistoryRange.oneMonth,
+      );
+      expect(series.length, greaterThanOrEqualTo(2));
+      expect(series.first.date, DateTime.utc(2026, 8, 1));
+      expect(series.first.close, closeTo(200, 0.01));
+    });
   });
 }

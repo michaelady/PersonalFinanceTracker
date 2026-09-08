@@ -1,0 +1,71 @@
+name: Build Android AAB
+
+# Tag a Play-oriented build, e.g. git tag v1.0.0 && git push origin v1.0.0
+# Optional secrets (all four): ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+# ANDROID_KEY_PASSWORD, ANDROID_KEY_ALIAS. Missing secrets → debug-signed smoke AAB.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-aab-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  aab:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Configure release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "${ANDROID_KEYSTORE_BASE64}" ]; then
+            echo "No ANDROID_KEYSTORE_BASE64 secret; AAB will be debug-signed (not for Play)."
+            echo "signed_with=debug" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/android/upload-keystore.jks"
+          cat > "$GITHUB_WORKSPACE/android/key.properties" <<EOF
+          storePassword=${ANDROID_KEYSTORE_PASSWORD}
+          keyPassword=${ANDROID_KEY_PASSWORD}
+          keyAlias=${ANDROID_KEY_ALIAS:-upload}
+          storeFile=$GITHUB_WORKSPACE/android/upload-keystore.jks
+          EOF
+          echo "signed_with=upload" >> "$GITHUB_ENV"
+
+      - name: Build app bundle
+        run: flutter build appbundle --release
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: zentho-android-aab-${{ env.signed_with || 'debug' }}
+          if-no-files-found: error
+          path: build/app/outputs/bundle/release/app-release.aab

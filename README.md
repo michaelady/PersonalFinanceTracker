@@ -58,7 +58,19 @@ Most phones: download [`android-dist/Zentho-arm64.apk`](android-dist/Zentho-arm6
 ./scripts/build-android-apk.sh
 ```
 
-The release APK is signed with the Android debug key so you can sideload it. Use a real release keystore before Play Store. Google sign-in on Android uses the same Firebase web project (`zentho-db83e`) via Identity Toolkit — it does not need a native Android app id. Unsigned-in use stays on this device.
+The release APK is signed with the Android debug key so you can sideload it. Google sign-in on Android uses the same Firebase web project (`zentho-db83e`) via Identity Toolkit — it does not need a native Android app id. Unsigned-in use stays on this device.
+
+## Google Play (Android App Bundle)
+
+Play uploads must be an **AAB** signed with an upload keystore, not the sideload APKs. Full checklist: [`docs/play-store.md`](docs/play-store.md). Privacy policy placeholder: [`docs/privacy-policy.template.md`](docs/privacy-policy.template.md) (hosted at `/privacy.html` on the live site).
+
+```bash
+cp android/key.properties.example android/key.properties
+# edit passwords + storeFile, generate the .jks as documented in docs/play-store.md
+./scripts/build-android-aab.sh
+```
+
+`applicationId` is `com.zentho.zentho`. Do not change it after the first Play upload. Never commit `android/key.properties` or the keystore.
 
 ## Test
 

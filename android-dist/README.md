@@ -11,3 +11,5 @@ Sideload installers for testing on a phone. Most modern phones want **`Zentho-ar
 The app works offline with local storage. Google sign-in on this APK talks to Firebase project `zentho-db83e` over Identity Toolkit (same accounts as the website). Unsigned-in use does not need a Google account.
 
 Rebuild with `./scripts/build-android-apk.sh` from a machine with Flutter and the Android SDK.
+
+These APKs are **not** for Google Play. Play needs a release AAB (`./scripts/build-android-aab.sh`) signed with an upload key — see [`docs/play-store.md`](../docs/play-store.md).

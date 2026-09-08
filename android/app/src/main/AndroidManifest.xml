@@ -1,9 +1,28 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- FX rates, market quotes, Firebase Auth / Firestore, Google OAuth. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Bill / invoice scan ("Take photo"). -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- CSV / image pick on Android 12 and older. API 33+ uses the system
+         photo picker and Storage Access Framework (no broad media permission). -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32"/>
+    <!-- Do not declare Photo/Video/Audio storage permissions. Play's photo and
+         video policy rejects broad media access when the system picker suffices. -->
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_IMAGES"
+        tools:node="remove"/>
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_VIDEO"
+        tools:node="remove"/>
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_AUDIO"
+        tools:node="remove"/>
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
+        tools:node="remove"/>
 
     <!-- Camera is used for bill scan; the app still runs on devices without one. -->
     <uses-feature
@@ -15,7 +34,13 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:enableOnBackInvokedCallback="true">
+        android:enableOnBackInvokedCallback="true"
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        tools:replace="android:allowBackup,android:fullBackupContent,android:dataExtractionRules,android:usesCleartextTraffic,android:networkSecurityConfig">
         <activity
             android:name=".MainActivity"
             android:exported="true"

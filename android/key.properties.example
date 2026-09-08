@@ -1,0 +1,17 @@
+# Copy this file to android/key.properties and fill in local values.
+# android/key.properties is gitignored — never commit passwords or the keystore.
+#
+# Generate an upload keystore (keep this file offline / in a password manager):
+#
+#   keytool -genkey -v \
+#     -keystore "$HOME/zentho-upload-keystore.jks" \
+#     -storetype JKS \
+#     -keyalg RSA -keysize 2048 -validity 10000 \
+#     -alias upload
+#
+# Then point storeFile at that path (use / on macOS/Linux; \\ on Windows).
+
+storePassword=replace-with-keystore-password
+keyPassword=replace-with-key-password
+keyAlias=upload
+storeFile=/absolute/path/to/zentho-upload-keystore.jks

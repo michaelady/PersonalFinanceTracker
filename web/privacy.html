@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zentho privacy policy (placeholder)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; color: #1c2b2b; }
+    .banner { background: #fff3cd; border: 1px solid #e39b2e; padding: 0.75rem 1rem; border-radius: 8px; }
+    h1 { color: #0b6e6e; }
+  </style>
+</head>
+<body>
+  <p class="banner"><strong>Placeholder — not legal advice.</strong> Adrian must replace this page with a finalized privacy policy before Google Play review. This text only describes how the app is built today so the listing can link somewhere public.</p>
+  <h1>Zentho privacy policy</h1>
+  <p>Effective date: to be set. Operator: to be set (developer / publisher name on Play).</p>
+  <h2>What Zentho stores</h2>
+  <p>Zentho is a personal finance tracker. On this device it stores household profiles, accounts, transactions, budgets, goals, holdings, settings, and optional quote-API tokens you paste in Settings. That data stays in local app storage unless you sign in.</p>
+  <h2>Optional Google account</h2>
+  <p>If you tap <strong>Sign in with Google</strong>, Zentho uses Google sign-in and stores a copy of the same ledger in Google Cloud Firestore under your user id so it can sync across devices. Sign-out does not wipe the copy on this device. Clearing all data in Settings wipes this device; cloud copies must be deleted from the Google account / Firebase project by the operator if required.</p>
+  <h2>Network calls</h2>
+  <ul>
+    <li>Exchange rates (Frankfurter, with an HTTPS fallback).</li>
+    <li>Market quotes (Yahoo Finance; optional Finnhub, Alpha Vantage, Twelve Data keys you supply).</li>
+    <li>Google / Firebase when you choose to sign in (authentication and Firestore).</li>
+    <li>Bill scan may send an image to an OCR endpoint if that feature is used.</li>
+  </ul>
+  <p>Traffic is HTTPS. The app does not enable cleartext HTTP.</p>
+  <h2>What we do not do</h2>
+  <p>Zentho does not sell personal or financial data. Android Auto Backup of app data is turned off. Optional API tokens stay on the device.</p>
+  <h2>Contact</h2>
+  <p>Replace this paragraph with a real contact email before Play review.</p>
+</body>
+</html>

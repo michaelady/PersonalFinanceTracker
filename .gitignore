@@ -49,3 +49,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Play upload signing (never commit). See android/key.properties.example.
+/android/key.properties
+*.jks
+*.keystore

@@ -47,6 +47,29 @@ void main() {
     expect(find.text('Using this device only'), findsOneWidget);
   });
 
+  testWidgets('Settings shows a privacy policy link', (tester) async {
+    final repo = await _readyRepo();
+    tester.view.physicalSize = const Size(400, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FinanceRepository>.value(
+        value: repo,
+        child: const MaterialApp(home: SettingsScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Privacy policy'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+
+    expect(find.text('Privacy policy'), findsOneWidget);
+  });
+
   testWidgets('User screen shows signed-in email and Sign out', (tester) async {
     final auth = FakeAuthService();
     final repo = await _readyRepo(auth: auth);

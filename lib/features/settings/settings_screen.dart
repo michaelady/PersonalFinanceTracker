@@ -4,11 +4,13 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../branding/zentho_logo.dart';
 import '../../data/repositories/finance_repository.dart';
 import '../../domain/models/models.dart';
 import '../../domain/services/csv_data_exchange.dart';
+import '../../legal/zentho_legal.dart';
 import '../../theme/zentho_colors.dart';
 import '../../widgets/responsive.dart';
 import '../accounts/accounts_screen.dart';
@@ -251,6 +253,19 @@ class SettingsScreen extends StatelessWidget {
                 onTap: () => _clearAll(context, repo),
               ),
               const SizedBox(height: 24),
+              Text('About', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.privacy_tip_outlined),
+                title: const Text('Privacy policy'),
+                subtitle: const Text(
+                  'How Zentho stores financial data on this device and in the cloud',
+                ),
+                trailing: const Icon(Icons.open_in_new),
+                onTap: () => _openPrivacyPolicy(context),
+              ),
+              const SizedBox(height: 24),
               Text(
                 'Offline-first · Google account syncs this device · '
                 'share household by invite link · '
@@ -261,6 +276,17 @@ class SettingsScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _openPrivacyPolicy(BuildContext context) async {
+    final launched = await launchUrl(
+      ZenthoLegal.privacyPolicyUri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (launched || !context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not open the privacy policy')),
     );
   }
 

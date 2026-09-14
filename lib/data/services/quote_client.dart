@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 
 import '../../domain/models/models.dart';
 import '../../domain/services/portfolio_math.dart';
+import '../../domain/services/yahoo_lots_csv.dart';
+
 
 class TickerSearchResult {
   const TickerSearchResult({
@@ -335,7 +337,8 @@ enum AlphaVantageThrottle {
 }
 
 /// CORS-open daily history (TIME_SERIES_DAILY). Used on web after Yahoo fails
-/// and Finnhub candles are unavailable on the free plan. Not used for last price.
+/// and Finnhub candles (or the quote itself) are unavailable. Last two daily
+/// closes can fill last price + previous close when Finnhub returns 403.
 ///
 /// Free keys only get `outputsize=compact` (~100 trading days). `full` (20y) is
 /// premium-only. One compact series is cached and sliced for 1M/3M/1Y.
@@ -353,6 +356,15 @@ class AlphaVantageHistoryClient {
 
   /// Free plan: 5 history calls per minute. Space HTTP starts by 12s.
   static const defaultMinRequestGap = Duration(seconds: 12);
+
+  /// Yahoo/Finnhub `.TO` is TSX; Alpha Vantage wants `.TRT` (see SHOP.TRT).
+  /// `.V` (TSXV) maps to `.TRV`. US and other Yahoo suffixes are unchanged.
+  static String symbolFor(String yahooOrFinnhub) {
+    final s = yahooOrFinnhub.trim().toUpperCase();
+    if (s.endsWith('.TO')) return '${s.substring(0, s.length - 3)}.TRT';
+    if (s.endsWith('.V')) return '${s.substring(0, s.length - 2)}.TRV';
+    return s;
+  }
 
   final String apiKey;
   final http.Client _client;
@@ -886,6 +898,74 @@ CachedQuote mergeFetchedQuote(CachedQuote? previous, QuoteBundle bundle) {
   return next.copyWith(history: history, historyFetchedAt: fetched);
 }
 
+/// Thrown when every quote vendor failed for a ticker. [toString] is safe to
+/// show on the Invest card (no Yahoo URL dump).
+class QuoteUnavailable implements Exception {
+  const QuoteUnavailable({
+    required this.symbol,
+    this.skippedYahoo = false,
+    this.yahooError,
+    this.finnhubError,
+  });
+
+  final String symbol;
+  final bool skippedYahoo;
+  final Object? yahooError;
+  final Object? finnhubError;
+
+  static bool isTorontoListing(String symbol) {
+    final s = symbol.trim().toUpperCase();
+    return s.endsWith('.TO') || s.endsWith('.V');
+  }
+
+  static bool isYahooBrowserBlock(Object? error) {
+    if (error == null) return false;
+    final t = error.toString();
+    return t.contains('Failed to fetch') &&
+        (t.contains('yahoo') || t.contains('finance.yahoo.com'));
+  }
+
+  static bool isFinnhubQuoteForbidden(Object? error) {
+    if (error == null) return false;
+    return error.toString().contains('Finnhub quote HTTP 403');
+  }
+
+  /// Compact copy for the portfolio source line.
+  static String shortMessage(Object error) {
+    if (error is QuoteUnavailable) return error.toString();
+    final t = error.toString();
+    if (isYahooBrowserBlock(error) &&
+        isFinnhubQuoteForbidden(error) &&
+        (t.contains('.TO') || t.contains('.V'))) {
+      return 'Yahoo is blocked in the browser. Finnhub 403 for a Toronto listing (free key has no TSX package).';
+    }
+    if (isYahooBrowserBlock(error)) {
+      return 'Yahoo is blocked in the browser.';
+    }
+    if (t.length > 160) return '${t.substring(0, 157)}...';
+    return t;
+  }
+
+  @override
+  String toString() {
+    final bits = <String>[];
+    if (skippedYahoo || isYahooBrowserBlock(yahooError)) {
+      bits.add('Yahoo is blocked in the browser');
+    }
+    if (isFinnhubQuoteForbidden(finnhubError)) {
+      bits.add(
+        isTorontoListing(symbol)
+            ? 'Finnhub 403 for $symbol (free key has no TSX package)'
+            : 'Finnhub 403 for $symbol',
+      );
+    } else if (finnhubError != null) {
+      bits.add('Finnhub failed for $symbol');
+    }
+    if (bits.isEmpty) return 'Quotes unavailable for $symbol';
+    return bits.join('. ');
+  }
+}
+
 /// Try Yahoo first (native Android/Windows). On failure, Finnhub quote (and
 /// candles when the plan allows). If candles are missing, Alpha Vantage daily
 /// history is tried, then Twelve Data when AV is missing or throws
@@ -896,6 +976,7 @@ class CompositeQuoteClient implements QuoteClient {
     this.finnhub,
     this.alphaVantage,
     this.twelveData,
+    this.skipYahoo = false,
   });
 
   /// Yahoo plus optional Finnhub / Alpha Vantage / Twelve Data. User-saved
@@ -909,9 +990,11 @@ class CompositeQuoteClient implements QuoteClient {
     String? twelveDataUserToken,
     String twelveDataBakedToken = bakedTwelveDataApiKey,
     http.Client? httpClient,
+    bool skipYahoo = false,
   }) {
     return CompositeQuoteClient(
       yahoo: yahoo,
+      skipYahoo: skipYahoo,
       finnhub: createFinnhubQuoteClient(
         userToken: userToken,
         bakedToken: bakedToken,
@@ -931,6 +1014,12 @@ class CompositeQuoteClient implements QuoteClient {
   }
 
   final QuoteClient yahoo;
+
+  /// When true (GitHub Pages / Flutter web), do not call Yahoo. The v8 chart
+  /// host sends no CORS headers; the browser surfaces `ClientException:
+  /// Failed to fetch`. There is no Pages setting that can fix Yahoo's
+  /// response, and this app does not use a CORS proxy.
+  final bool skipYahoo;
   final QuoteClient? finnhub;
   final AlphaVantageHistoryClient? alphaVantage;
   final TwelveDataHistoryClient? twelveData;
@@ -940,21 +1029,34 @@ class CompositeQuoteClient implements QuoteClient {
     String symbol, {
     QuoteHistoryRange range = QuoteHistoryRange.oneMonth,
   }) async {
-    try {
-      return await yahoo.fetchChart(symbol, range: range);
-    } catch (yahooError) {
-      final fallback = finnhub;
-      if (fallback == null) rethrow;
-      final QuoteBundle bundle;
+    Object? yahooError;
+    if (!skipYahoo) {
       try {
-        bundle = await fallback.fetchChart(symbol, range: range);
+        return await yahoo.fetchChart(symbol, range: range);
+      } catch (error) {
+        yahooError = error;
+      }
+    }
+    final fallback = finnhub;
+    if (fallback != null) {
+      try {
+        final bundle = await fallback.fetchChart(symbol, range: range);
+        return await _attachDailyHistory(bundle, symbol, range);
       } catch (finnhubError) {
-        throw StateError(
-          'Yahoo failed ($yahooError); Finnhub failed ($finnhubError)',
+        final daily = await _lastPriceFromDailyHistory(symbol, range);
+        if (daily != null) return daily;
+        throw QuoteUnavailable(
+          symbol: symbol,
+          skippedYahoo: skipYahoo,
+          yahooError: yahooError,
+          finnhubError: finnhubError,
         );
       }
-      return _attachDailyHistory(bundle, symbol, range);
     }
+    final daily = await _lastPriceFromDailyHistory(symbol, range);
+    if (daily != null) return daily;
+    if (yahooError != null) throw yahooError;
+    throw QuoteUnavailable(symbol: symbol, skippedYahoo: skipYahoo);
   }
 
   /// Finnhub last price is kept. Empty / 403 candles get Alpha Vantage daily
@@ -973,7 +1075,7 @@ class CompositeQuoteClient implements QuoteClient {
         return _withSlicedDailyHistory(
           bundle,
           range,
-          await av.fetchDailyHistory(symbol),
+          await av.fetchDailyHistory(AlphaVantageHistoryClient.symbolFor(symbol)),
         );
       } catch (error) {
         if (AlphaVantageHistoryClient.isPerMinuteThrottleError(error)) {
@@ -1009,6 +1111,74 @@ class CompositeQuoteClient implements QuoteClient {
     return bundle;
   }
 
+  /// Last completed daily close as last price when Finnhub's quote 403s
+  /// (typical for `.TO` on a free key). Not a live Yahoo session.
+  Future<QuoteBundle?> _lastPriceFromDailyHistory(
+    String symbol,
+    QuoteHistoryRange range,
+  ) async {
+    final ticker = symbol.trim().toUpperCase();
+    final av = alphaVantage;
+    if (av != null) {
+      try {
+        final bundle = _quoteFromDailyCloses(
+          ticker: ticker,
+          range: range,
+          year: await av.fetchDailyHistory(
+            AlphaVantageHistoryClient.symbolFor(ticker),
+          ),
+          source: 'alphavantage',
+        );
+        if (bundle != null) return bundle;
+      } catch (_) {}
+    }
+    final td = twelveData;
+    if (td != null) {
+      try {
+        return _quoteFromDailyCloses(
+          ticker: ticker,
+          range: range,
+          year: await td.fetchDailyHistory(ticker),
+          source: 'twelvedata',
+        );
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  QuoteBundle? _quoteFromDailyCloses({
+    required String ticker,
+    required QuoteHistoryRange range,
+    required List<PricePoint> year,
+    required String source,
+  }) {
+    if (year.length < 2) return null;
+    final last = year.last;
+    final prior = year[year.length - 2];
+    if (last.close <= 0 || prior.close <= 0) return null;
+    final at = DateTime.now().toUtc();
+    final quote = CachedQuote(
+      symbol: ticker,
+      price: last.close,
+      currency: YahooLotsCsv.currencyForSymbol(ticker, 'USD'),
+      fetchedAt: at,
+      source: source,
+      previousClose: prior.close,
+      changePercent: ((last.close - prior.close) / prior.close) * 100,
+      history: {QuoteHistoryRange.oneYear.key: year},
+      historyFetchedAt: {QuoteHistoryRange.oneYear.key: at},
+    );
+    return _withSlicedDailyHistory(
+      QuoteBundle(
+        quote: quote,
+        history: year,
+        range: QuoteHistoryRange.oneYear,
+      ),
+      range,
+      year,
+    );
+  }
+
   QuoteBundle _withSlicedDailyHistory(
     QuoteBundle bundle,
     QuoteHistoryRange range,
@@ -1042,16 +1212,15 @@ class CompositeQuoteClient implements QuoteClient {
 
   @override
   Future<List<TickerSearchResult>> search(String query) async {
-    try {
-      final results = await yahoo.search(query);
-      if (results.isNotEmpty) return results;
-      final fallback = finnhub;
-      if (fallback == null) return results;
-      return await fallback.search(query);
-    } catch (_) {
-      final fallback = finnhub;
-      if (fallback == null) rethrow;
-      return await fallback.search(query);
+    if (!skipYahoo) {
+      try {
+        final results = await yahoo.search(query);
+        if (results.isNotEmpty) return results;
+      } catch (_) {}
     }
+    final fallback = finnhub;
+    if (fallback != null) return await fallback.search(query);
+    if (skipYahoo) return const [];
+    return await yahoo.search(query);
   }
 }

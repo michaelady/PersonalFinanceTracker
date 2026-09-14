@@ -443,6 +443,7 @@ class FinanceRepository extends ChangeNotifier {
         _compositeTwelveDataToken != twelveDataToken) {
       _compositeClient = CompositeQuoteClient.fromTokens(
         yahoo: yahoo,
+        skipYahoo: kIsWeb,
         userToken: finnhubToken,
         alphaVantageUserToken: alphaVantageToken,
         twelveDataUserToken: twelveDataToken,
@@ -1296,6 +1297,7 @@ class FinanceRepository extends ChangeNotifier {
 
     var fetched = 0;
     String? lastSource;
+    Object? lastError;
     final failures = <String>[];
     try {
       for (var i = 0; i < tickers.length; i++) {
@@ -1328,8 +1330,9 @@ class FinanceRepository extends ChangeNotifier {
           fetched++;
         } catch (e) {
           failures.add(ticker);
+          lastError = e;
           if (cached == null) {
-            quotesError ??= e.toString();
+            quotesError ??= QuoteUnavailable.shortMessage(e);
           }
         }
         if (i != tickers.length - 1) {
@@ -1339,15 +1342,26 @@ class FinanceRepository extends ChangeNotifier {
       if (fetched > 0) {
         quotesUpdatedAt = DateTime.now().toUtc();
         quotesSource = lastSource;
-        if (failures.isEmpty) quotesError = null;
+        if (failures.isEmpty) {
+          quotesError = null;
+        } else {
+          quotesError ??=
+              'Could not refresh ${failures.join(', ')} — showing last saved prices.';
+        }
         await _store.saveQuotes(quotes);
       } else if (failures.isNotEmpty && quotes.values.isNotEmpty) {
-        quotesError =
-            'Could not refresh quotes — showing last saved prices.';
+        final detail =
+            lastError == null ? null : QuoteUnavailable.shortMessage(lastError);
+        quotesError = [
+          'Could not refresh quotes — showing last saved prices.',
+          ?detail,
+        ].join(' ');
       } else if (failures.isNotEmpty) {
         quotesError = resolveFinnhubToken(userToken: finnhubToken) == null
-            ? 'Quotes unavailable. On the website, add a free Finnhub token in Settings.'
-            : 'Could not refresh quotes.';
+            ? 'Quotes unavailable. On the website, add a free Finnhub token in Settings. Yahoo is blocked in the browser.'
+            : (lastError == null
+                ? 'Could not refresh quotes.'
+                : QuoteUnavailable.shortMessage(lastError));
       }
     } finally {
       quotesRefreshing = false;

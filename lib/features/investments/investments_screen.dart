@@ -174,9 +174,11 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Lots from your buy/sell history, with Yahoo Finance quotes '
-              '(unofficial, delayed, not advice). Average-cost basis; '
-              'realized P/L from sells + dividends; unrealized vs last price.',
+              'Lots from your buy/sell history. Android and Windows use Yahoo '
+              'Finance quotes (unofficial, delayed, not advice). This website '
+              'cannot call Yahoo (browser CORS) — it uses Finnhub, then daily '
+              'closes. Average-cost basis; realized P/L from sells + dividends; '
+              'unrealized vs last price.',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 16),
@@ -318,9 +320,12 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             'Android and Windows fetch Yahoo directly. This website cannot, '
-            'because Yahoo does not allow browser requests — it may already '
-            'have a default Finnhub key, and a personal key in Settings still '
-            'overrides it. Last successful prices stay on this device for offline use.',
+            'because Yahoo does not send CORS headers — GitHub Pages cannot '
+            'fix that, and Zentho does not use a CORS proxy. US tickers may '
+            'already use a default Finnhub key (Settings can override it). '
+            'Toronto (.TO) listings 403 on free Finnhub (Canadian package); '
+            'the site then tries Alpha Vantage / Twelve Data daily closes. '
+            'Last successful prices stay on this device.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
         ],

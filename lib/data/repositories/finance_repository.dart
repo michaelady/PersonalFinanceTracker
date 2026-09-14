@@ -1303,7 +1303,16 @@ class FinanceRepository extends ChangeNotifier {
         final cached = quotes[ticker];
         final quoteFresh =
             cached != null && PortfolioMath.quoteIsFresh(cached.fetchedAt);
-        if (!force && cached != null && quoteFresh && _historyCacheFresh(cached, range)) {
+        final stalePrev = cached != null &&
+            PortfolioMath.previousCloseLooksLikeRangeStart(
+              cached,
+              cached.previousClose,
+            );
+        if (!force &&
+            cached != null &&
+            quoteFresh &&
+            _historyCacheFresh(cached, range) &&
+            !stalePrev) {
           lastSource = cached.source;
           continue;
         }
@@ -1312,7 +1321,7 @@ class FinanceRepository extends ChangeNotifier {
               await _quoteClient.fetchChart(ticker, range: range);
           quotes = {
             ...quotes,
-            ticker: _mergeQuote(cached, bundle),
+            ticker: mergeFetchedQuote(cached, bundle),
           };
           _ensureRateFor(bundle.quote.currency);
           lastSource = bundle.quote.source;
@@ -1344,22 +1353,6 @@ class FinanceRepository extends ChangeNotifier {
       quotesRefreshing = false;
       notifyListeners();
     }
-  }
-
-  CachedQuote _mergeQuote(CachedQuote? previous, QuoteBundle bundle) {
-    final next = bundle.quote;
-    if (previous == null) return next;
-    final history = {...previous.history, ...next.history};
-    final fetched = {...previous.historyFetchedAt, ...next.historyFetchedAt};
-    final range = bundle.range;
-    // A per-minute Alpha Vantage miss omits this range's stamp so retries are
-    // not blocked for the whole quote TTL. Do not resurrect a previous stamp.
-    if (range != null &&
-        !next.historyFetchedAt.containsKey(range.key) &&
-        (next.history[range.key]?.length ?? 0) < 2) {
-      fetched.remove(range.key);
-    }
-    return next.copyWith(history: history, historyFetchedAt: fetched);
   }
 
   /// Skip a network fetch when this range (or a longer cached series) is fresh.

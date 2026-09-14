@@ -179,6 +179,15 @@ void main() {
     expect(quote.source, 'finnhub');
     expect(quote.price, closeTo(325.13, 0.0001));
     expect(quote.changePercent, closeTo(1.25, 0.0001));
+    expect(quote.previousClose, closeTo(321.12, 0.0001));
+    expect(
+      FinnhubQuoteClient.sessionPreviousCloseFromQuote(
+        price: 150.29,
+        previousClose: null,
+        change: -16.95,
+      ),
+      closeTo(167.24, 0.0001),
+    );
     expect(
       FinnhubQuoteClient.parseCandle({
         's': 'ok',
@@ -372,6 +381,79 @@ void main() {
     expect(bundle.quote.previousClose, closeTo(130, 0.0001));
     expect(bundle.history, isEmpty);
     expect(finnhub.candlesUnavailableOnPlan, isTrue);
+  });
+
+  test('mergeFetchedQuote drops Yahoo 1mo history when source flips to Finnhub',
+      () {
+    final yahoo = CachedQuote(
+      symbol: 'TSLA',
+      price: 363.10,
+      currency: 'USD',
+      fetchedAt: DateTime.utc(2026, 9, 14, 16),
+      source: 'yahoo',
+      changePercent: -0.64,
+      previousClose: 342.27,
+      history: {
+        '1mo': [
+          PricePoint(date: DateTime.utc(2026, 8, 14), close: 342.27),
+          PricePoint(date: DateTime.utc(2026, 9, 11), close: 365.44),
+          PricePoint(date: DateTime.utc(2026, 9, 14), close: 363.10),
+        ],
+      },
+      historyFetchedAt: {'1mo': DateTime.utc(2026, 9, 14, 16)},
+    );
+    final finnhub = CachedQuote(
+      symbol: 'TSLA',
+      price: 362.53,
+      currency: 'USD',
+      fetchedAt: DateTime.utc(2026, 9, 14, 17),
+      source: 'finnhub',
+      changePercent: -0.796,
+      previousClose: 365.44,
+    );
+    final merged = mergeFetchedQuote(
+      yahoo,
+      QuoteBundle(quote: finnhub, range: QuoteHistoryRange.oneMonth),
+    );
+    expect(merged.source, 'finnhub');
+    expect(merged.previousClose, closeTo(365.44, 0.0001));
+    expect(merged.history, isEmpty);
+    expect(merged.historyFetchedAt, isEmpty);
+  });
+
+  test('mergeFetchedQuote keeps same-source history', () {
+    final previous = CachedQuote(
+      symbol: 'AAPL',
+      price: 320,
+      currency: 'USD',
+      fetchedAt: DateTime.utc(2026, 9, 14, 16),
+      source: 'finnhub',
+      previousClose: 318,
+      history: {
+        '1y': [
+          PricePoint(date: DateTime.utc(2026, 8, 1), close: 300),
+          PricePoint(date: DateTime.utc(2026, 9, 14), close: 320),
+        ],
+      },
+      historyFetchedAt: {'1y': DateTime.utc(2026, 9, 14, 16)},
+    );
+    final next = CachedQuote(
+      symbol: 'AAPL',
+      price: 325.13,
+      currency: 'USD',
+      fetchedAt: DateTime.utc(2026, 9, 14, 17),
+      source: 'finnhub',
+      previousClose: 321.12,
+    );
+    final merged = mergeFetchedQuote(
+      previous,
+      QuoteBundle(
+        quote: next,
+        range: QuoteHistoryRange.oneMonth,
+      ),
+    );
+    expect(merged.price, closeTo(325.13, 0.0001));
+    expect(merged.history['1y'], hasLength(2));
   });
 
   test('Alpha Vantage parser reads daily closes oldest-first and trims to 1y',

@@ -979,6 +979,7 @@ String? _sourceLabel(String? source) {
     'finnhub' => 'Finnhub',
     'alphavantage' => 'Alpha Vantage',
     'twelvedata' => 'Twelve Data',
+    'mixed' => 'mixed sources',
     null => null,
     _ => source,
   };

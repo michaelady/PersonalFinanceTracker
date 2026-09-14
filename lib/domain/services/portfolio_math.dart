@@ -577,7 +577,7 @@ abstract final class PortfolioMath {
     var hasDay = false;
     var previousMarket = 0.0;
     DateTime? latestQuote;
-    String? source;
+    final sources = <String>{};
     var realized = 0.0;
     var dividends = 0.0;
     var invested = 0.0;
@@ -598,12 +598,16 @@ abstract final class PortfolioMath {
           previousMarket += v.marketMain! - v.dayChangeMain!;
         }
       }
+      final src = v.quoteSource;
+      if (src != null && src.isNotEmpty) sources.add(src);
       if (v.quotedAt != null &&
           (latestQuote == null || v.quotedAt!.isAfter(latestQuote))) {
         latestQuote = v.quotedAt;
-        source = v.quoteSource;
       }
     }
+    final source = sources.length > 1
+        ? 'mixed'
+        : (sources.isEmpty ? null : sources.first);
 
     final market = hasMarket ? marketKnown : cost;
     final pl = hasMarket ? market - cost : null;
@@ -699,10 +703,16 @@ abstract final class PortfolioMath {
   }
 
   /// Previous regular-session close for day P/L (Yahoo-style last vs
-  /// previous close). Prefers daily history and percent-implied previous
-  /// over [CachedQuote.previousClose] when that field is the chart-range
-  /// start (`chartPreviousClose` on a 1M/3M/1Y Yahoo chart), which can
-  /// flip the sign vs today's move.
+  /// previous close).
+  ///
+  /// Yahoo: prefer daily history and percent-implied previous over
+  /// [CachedQuote.previousClose] when that field is the chart-range start
+  /// (`chartPreviousClose` on a 1M/3M/1Y Yahoo chart), which can flip the
+  /// sign vs today's move.
+  ///
+  /// Finnhub: `pc` *is* yesterday. Do not replace it with Alpha Vantage /
+  /// leftover Yahoo 1M first-bar history unless `pc` itself is that
+  /// range-start value (source-flip merge of a Yahoo chart).
   static double? sessionPreviousClose(CachedQuote quote, {DateTime? now}) {
     final stored =
         quote.previousClose != null && quote.previousClose! > 0
@@ -713,21 +723,39 @@ abstract final class PortfolioMath {
       quote.changePercent,
     );
     final fromHist = previousCloseFromHistory(quote, now: now);
+    final rangeStart = previousCloseLooksLikeRangeStart(quote, stored);
+
+    if (quote.source == 'finnhub') {
+      if (stored != null && !rangeStart) return stored;
+      return fromPct ?? fromHist ?? stored;
+    }
 
     if (stored != null &&
         fromPct != null &&
         !nearlySamePrice(stored, fromPct)) {
       return fromHist ?? fromPct;
     }
-    if (fromHist != null && stored != null) {
-      final closes = dailyCloses(quote);
-      if (closes.length >= 2 &&
-          nearlySamePrice(stored, closes.first.close) &&
-          !nearlySamePrice(stored, fromHist)) {
-        return fromHist;
-      }
+    if (rangeStart &&
+        fromHist != null &&
+        stored != null &&
+        !nearlySamePrice(stored, fromHist)) {
+      return fromHist;
     }
     return stored ?? fromPct ?? fromHist;
+  }
+
+  /// True when [stored] matches the first daily bar (Yahoo
+  /// `chartPreviousClose` on a ranged chart) and not the session previous.
+  static bool previousCloseLooksLikeRangeStart(
+    CachedQuote quote,
+    double? stored,
+  ) {
+    if (stored == null || stored <= 0) return false;
+    final closes = dailyCloses(quote);
+    if (closes.length < 2) return false;
+    if (!nearlySamePrice(stored, closes.first.close)) return false;
+    final fromHist = previousCloseFromHistory(quote);
+    return fromHist == null || !nearlySamePrice(stored, fromHist);
   }
 
   static double? previousCloseFromChangePercent(

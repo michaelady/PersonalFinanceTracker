@@ -332,6 +332,90 @@ void main() {
       expect(totals.unrealizedPlMain, isPositive);
     });
 
+    test('Finnhub pc is Day previous close even when stale 1mo history would flip',
+        () {
+      // Yahoo 1mo leftover after CORS fallback: first bar is last month.
+      // Finnhub dp is 0 (common) so percent-implied previous is last price;
+      // history last bar is the range start — that would paint a down session
+      // as a gain if we preferred fromHist over pc.
+      final holding = lot(ticker: 'TSLA', shares: 10, cost: 300);
+      final q = CachedQuote(
+        symbol: 'TSLA',
+        price: 362.53,
+        currency: 'USD',
+        fetchedAt: DateTime.utc(2026, 9, 14, 17),
+        source: 'finnhub',
+        changePercent: 0,
+        previousClose: 365.44,
+        history: {
+          '1mo': [
+            PricePoint(date: DateTime.utc(2026, 8, 14), close: 342.27),
+            PricePoint(date: DateTime.utc(2026, 8, 15), close: 350.00),
+          ],
+        },
+      );
+      final totals = PortfolioMath.summarize(
+        holdings: [holding],
+        quotes: {'TSLA': q},
+        mainCurrency: 'USD',
+        rates: rates,
+      );
+      expect(PortfolioMath.sessionPreviousClose(q), closeTo(365.44, 0.0001));
+      expect(totals.dayChangeMain, closeTo(10 * (362.53 - 365.44), 0.01));
+      expect(totals.dayChangeMain, isNegative);
+      expect(10 * (362.53 - 342.27), isPositive);
+      expect(10 * (362.53 - 350.00), isPositive);
+    });
+
+    test('Finnhub pc that is the 1mo range start yields to session percent', () {
+      final q = CachedQuote(
+        symbol: 'TSLA',
+        price: 362.53,
+        currency: 'USD',
+        fetchedAt: DateTime.utc(2026, 9, 14, 17),
+        source: 'finnhub',
+        changePercent: -0.796,
+        previousClose: 342.27,
+        history: {
+          '1mo': [
+            PricePoint(date: DateTime.utc(2026, 8, 14), close: 342.27),
+            PricePoint(date: DateTime.utc(2026, 9, 11), close: 365.44),
+            PricePoint(date: DateTime.utc(2026, 9, 14), close: 362.53),
+          ],
+        },
+      );
+      expect(PortfolioMath.previousCloseLooksLikeRangeStart(q, 342.27), isTrue);
+      expect(
+        PortfolioMath.sessionPreviousClose(q),
+        closeTo(362.53 / (1 - 0.796 / 100), 0.05),
+      );
+      expect(PortfolioMath.sessionPreviousClose(q)! > 360, isTrue);
+    });
+
+    test('portfolio source is mixed when Yahoo and Finnhub quotes are both used',
+        () {
+      final aapl = lot(ticker: 'AAPL', shares: 1, cost: 100);
+      final tsla = lot(ticker: 'TSLA', shares: 1, cost: 100);
+      final totals = PortfolioMath.summarize(
+        holdings: [aapl, tsla],
+        quotes: {
+          'AAPL': quote(
+            symbol: 'AAPL',
+            price: 110,
+            previousClose: 100,
+          ).copyWith(source: 'yahoo'),
+          'TSLA': quote(
+            symbol: 'TSLA',
+            price: 90,
+            previousClose: 100,
+          ).copyWith(source: 'finnhub'),
+        },
+        mainCurrency: 'USD',
+        rates: rates,
+      );
+      expect(totals.quoteSource, 'mixed');
+    });
+
     test('uses cost when a quote is missing and respects includeInNetWorth', () {
       final counted = lot(ticker: 'AAPL', shares: 2, cost: 50);
       final excluded = lot(

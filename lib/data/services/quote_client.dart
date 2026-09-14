@@ -780,9 +780,10 @@ class FinnhubQuoteClient implements QuoteClient {
     DateTime? fetchedAt,
   }) {
     final price = (json['c'] as num?)?.toDouble() ?? 0;
-    final previous = (json['pc'] as num?)?.toDouble();
+    final change = (json['d'] as num?)?.toDouble();
+    final listedPrev = (json['pc'] as num?)?.toDouble();
     final changePct = (json['dp'] as num?)?.toDouble();
-    if (price == 0 && (previous == null || previous == 0)) {
+    if (price == 0 && (listedPrev == null || listedPrev == 0)) {
       throw StateError('Finnhub returned no price for $ticker');
     }
     final at = fetchedAt ?? DateTime.now().toUtc();
@@ -793,8 +794,29 @@ class FinnhubQuoteClient implements QuoteClient {
       fetchedAt: at,
       source: 'finnhub',
       changePercent: changePct,
-      previousClose: previous,
+      previousClose: sessionPreviousCloseFromQuote(
+        price: price,
+        previousClose: listedPrev,
+        change: change,
+        changePercent: changePct,
+      ),
     );
+  }
+
+  /// Finnhub `pc` is yesterday. Fall back to `c − d`, then percent-implied.
+  /// Never uses a daily series (those may be Alpha Vantage / Yahoo 1M).
+  static double? sessionPreviousCloseFromQuote({
+    required double price,
+    double? previousClose,
+    double? change,
+    double? changePercent,
+  }) {
+    if (previousClose != null && previousClose > 0) return previousClose;
+    if (change != null) {
+      final implied = price - change;
+      if (implied > 0) return implied;
+    }
+    return PortfolioMath.previousCloseFromChangePercent(price, changePercent);
   }
 
   static List<PricePoint> parseCandle(Map<String, dynamic> json) {
@@ -842,6 +864,26 @@ class FinnhubQuoteClient implements QuoteClient {
     }
     return out;
   }
+}
+
+/// Keep same-source daily history across refetches. Drop the other vendor's
+/// series so Day P/L cannot treat a 1M range-start close as yesterday after
+/// Yahoo ↔ Finnhub fallback.
+CachedQuote mergeFetchedQuote(CachedQuote? previous, QuoteBundle bundle) {
+  final next = bundle.quote;
+  if (previous == null) return next;
+  if (previous.source != next.source) return next;
+  final history = {...previous.history, ...next.history};
+  final fetched = {...previous.historyFetchedAt, ...next.historyFetchedAt};
+  final range = bundle.range;
+  // A per-minute Alpha Vantage miss omits this range's stamp so retries are
+  // not blocked for the whole quote TTL. Do not resurrect a previous stamp.
+  if (range != null &&
+      !next.historyFetchedAt.containsKey(range.key) &&
+      (next.history[range.key]?.length ?? 0) < 2) {
+    fetched.remove(range.key);
+  }
+  return next.copyWith(history: history, historyFetchedAt: fetched);
 }
 
 /// Try Yahoo first (native Android/Windows). On failure, Finnhub quote (and

@@ -153,7 +153,7 @@ class SettingsScreen extends StatelessWidget {
                 title: const Text('Finnhub API token (optional)'),
                 subtitle: Text(
                     repo.finnhubToken != null && repo.finnhubToken!.isNotEmpty
-                        ? 'Saved on this device only — overrides the website default when Yahoo is blocked'
+                        ? 'Saved on this device only — overrides the website default when browser CORS blocks Yahoo'
                         : 'The website may already have a default key; a personal key still overrides it.',
                 ),
                 trailing: const Icon(Icons.edit_outlined),
@@ -417,10 +417,11 @@ class SettingsScreen extends StatelessWidget {
               'Optional. Stored only on this device — never synced or exported. '
               'The website may already have a default key; a personal key still '
               'overrides it. Get a free key at finnhub.io. Free keys quote US '
-              'symbols; Toronto (.TO) needs Finnhub\'s Canadian package and '
-              'returns HTTP 403 otherwise. Leave blank to use the default (if '
-              'any). Android and Windows use Yahoo Finance directly — Yahoo is '
-              'blocked in the browser (CORS), and there is no quote-provider switch.',
+              'symbols. Non-US listings (TSX .TO, Swiss .SW, and similar) '
+              'return HTTP 403 without an exchange package; the site then tries '
+              'Alpha Vantage / Twelve Data daily closes. Leave blank to use the '
+              'default (if any). Android and Windows use Yahoo Finance directly '
+              '— browser CORS blocks Yahoo, and there is no quote-provider switch.',
             ),
             const SizedBox(height: 12),
             TextField(
@@ -476,8 +477,8 @@ class SettingsScreen extends StatelessWidget {
           children: [
             const Text(
               'Optional. Stored only on this device — never synced or exported. '
-              'Used for daily price history on the website when Yahoo is blocked '
-              'and Finnhub candles are not on the free plan. Get a free key at '
+              'Used for daily price history on the website when browser CORS '
+              'blocks Yahoo and Finnhub 403s non-US quotes or candles. Get a free key at '
               'alphavantage.co. Leave blank to use the website default (if any).',
             ),
             const SizedBox(height: 12),

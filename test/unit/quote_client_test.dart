@@ -383,11 +383,16 @@ void main() {
     expect(finnhub.candlesUnavailableOnPlan, isTrue);
   });
 
-  test('Alpha Vantage maps Yahoo .TO to .TRT', () {
+  test('Alpha Vantage maps Yahoo suffixes to documented AV listings', () {
     expect(AlphaVantageHistoryClient.symbolFor('AAPL.TO'), 'AAPL.TRT');
     expect(AlphaVantageHistoryClient.symbolFor('msft.to'), 'MSFT.TRT');
     expect(AlphaVantageHistoryClient.symbolFor('SHOP.V'), 'SHOP.TRV');
+    expect(AlphaVantageHistoryClient.symbolFor('NESN.SW'), 'NESN.SWI');
+    expect(AlphaVantageHistoryClient.symbolFor('nesn.sw'), 'NESN.SWI');
+    expect(AlphaVantageHistoryClient.symbolFor('VOD.L'), 'VOD.LON');
+    expect(AlphaVantageHistoryClient.symbolFor('PHIA.AS'), 'PHIA.AMS');
     expect(AlphaVantageHistoryClient.symbolFor('VTI'), 'VTI');
+    expect(AlphaVantageHistoryClient.yahooToAlphaVantageSuffix['.SW'], '.SWI');
   });
 
   test('skipYahoo does not call Yahoo and uses Finnhub', () async {
@@ -468,38 +473,191 @@ void main() {
     expect(bundle.quote.price - bundle.quote.previousClose!, greaterThan(0));
   });
 
-  test('QuoteUnavailable copy names CORS and TSX 403 without Yahoo URLs', () {
-    final error = QuoteUnavailable(
+  test('Finnhub quote 403 on .SW uses Alpha Vantage .SWI last close as Day prev',
+      () async {
+    final now = DateTime.now().toUtc();
+    late http.Request avSeen;
+    final client = MockClient((request) async {
+      if (request.url.host.contains('yahoo')) {
+        fail('Yahoo must not be called when skipYahoo is true');
+      }
+      if (request.url.path.contains('/quote')) {
+        expect(request.url.queryParameters['symbol'], 'NESN.SW');
+        return http.Response('{"error":"You don\'t have access"}', 403);
+      }
+      if (request.url.host.contains('alphavantage')) {
+        avSeen = request;
+        return http.Response(
+          jsonEncode(_alphaVantageDaily({
+            _ymd(now.subtract(const Duration(days: 3))): '78.40',
+            _ymd(now.subtract(const Duration(days: 1))): '79.10',
+          })),
+          200,
+        );
+      }
+      fail('Unexpected ${request.url}');
+    });
+    final composite = CompositeQuoteClient(
+      yahoo: YahooQuoteClient(client: client),
+      skipYahoo: true,
+      finnhub: FinnhubQuoteClient(token: 'free-token', client: client),
+      alphaVantage: AlphaVantageHistoryClient(
+        apiKey: 'test-av-key',
+        client: client,
+        minRequestGap: Duration.zero,
+      ),
+    );
+    final bundle = await composite.fetchChart('NESN.SW');
+    expect(avSeen.url.queryParameters['symbol'], 'NESN.SWI');
+    expect(bundle.quote.source, 'alphavantage');
+    expect(bundle.quote.currency, 'CHF');
+    expect(bundle.quote.price, closeTo(79.10, 0.0001));
+    expect(bundle.quote.previousClose, closeTo(78.40, 0.0001));
+    expect(bundle.quote.price - bundle.quote.previousClose!, greaterThan(0));
+  });
+
+  test('Finnhub 403 on .SW uses Twelve Data Yahoo symbol when AV is missing',
+      () async {
+    final now = DateTime.now().toUtc();
+    late http.Request tdSeen;
+    final client = MockClient((request) async {
+      if (request.url.host.contains('yahoo')) {
+        fail('Yahoo must not be called when skipYahoo is true');
+      }
+      if (request.url.path.contains('/quote')) {
+        return http.Response('{"error":"You don\'t have access"}', 403);
+      }
+      if (request.url.host.contains('twelvedata')) {
+        tdSeen = request;
+        return http.Response(
+          jsonEncode(_twelveDataDaily('NESN.SW', {
+            _ymd(now.subtract(const Duration(days: 3))): '78.40',
+            _ymd(now.subtract(const Duration(days: 1))): '79.10',
+          })),
+          200,
+        );
+      }
+      fail('Unexpected ${request.url}');
+    });
+    final composite = CompositeQuoteClient(
+      yahoo: YahooQuoteClient(client: client),
+      skipYahoo: true,
+      finnhub: FinnhubQuoteClient(token: 'free-token', client: client),
+      twelveData: TwelveDataHistoryClient(
+        apiKey: 'test-td-key',
+        client: client,
+        minRequestGap: Duration.zero,
+      ),
+    );
+    final bundle = await composite.fetchChart('NESN.SW');
+    expect(tdSeen.url.queryParameters['symbol'], 'NESN.SW');
+    expect(bundle.quote.source, 'twelvedata');
+    expect(bundle.quote.currency, 'CHF');
+    expect(bundle.quote.price, closeTo(79.10, 0.0001));
+    expect(bundle.quote.previousClose, closeTo(78.40, 0.0001));
+  });
+
+  test('Finnhub 403 on .SW does not prevent a later US Finnhub quote', () async {
+    final now = DateTime.now().toUtc();
+    final seen = <String>[];
+    final client = MockClient((request) async {
+      if (request.url.host.contains('yahoo')) {
+        fail('Yahoo must not be called when skipYahoo is true');
+      }
+      if (request.url.path.contains('/quote')) {
+        final symbol = request.url.queryParameters['symbol']!;
+        seen.add('quote:$symbol');
+        if (symbol == 'NESN.SW') {
+          return http.Response('{"error":"You don\'t have access"}', 403);
+        }
+        return http.Response(
+          jsonEncode({'c': 262.97, 'd': 1.47, 'dp': 0.56, 'pc': 261.50}),
+          200,
+        );
+      }
+      if (request.url.path.contains('/candle')) {
+        seen.add('candle:${request.url.queryParameters['symbol']}');
+        return http.Response(
+          jsonEncode({
+            's': 'ok',
+            'c': [261.50, 262.97],
+            't': [1725148800, 1725235200],
+          }),
+          200,
+        );
+      }
+      if (request.url.host.contains('alphavantage')) {
+        seen.add('av:${request.url.queryParameters['symbol']}');
+        return http.Response(
+          jsonEncode(_alphaVantageDaily({
+            _ymd(now.subtract(const Duration(days: 3))): '78.40',
+            _ymd(now.subtract(const Duration(days: 1))): '79.10',
+          })),
+          200,
+        );
+      }
+      fail('Unexpected ${request.url}');
+    });
+    final composite = CompositeQuoteClient(
+      yahoo: YahooQuoteClient(client: client),
+      skipYahoo: true,
+      finnhub: FinnhubQuoteClient(token: 'free-token', client: client),
+      alphaVantage: AlphaVantageHistoryClient(
+        apiKey: 'test-av-key',
+        client: client,
+        minRequestGap: Duration.zero,
+      ),
+    );
+    final swiss = await composite.fetchChart('NESN.SW');
+    final us = await composite.fetchChart('VTI');
+    expect(swiss.quote.source, 'alphavantage');
+    expect(swiss.quote.previousClose, closeTo(78.40, 0.0001));
+    expect(us.quote.source, 'finnhub');
+    expect(us.quote.price, closeTo(262.97, 0.0001));
+    expect(us.quote.previousClose, closeTo(261.50, 0.0001));
+    expect(seen, contains('quote:NESN.SW'));
+    expect(seen, contains('av:NESN.SWI'));
+    expect(seen, contains('quote:VTI'));
+    expect(seen, contains('candle:VTI'));
+  });
+
+  test('QuoteUnavailable copy names CORS and exchange 403 without Yahoo URLs',
+      () {
+    final tsx = QuoteUnavailable(
       symbol: 'AAPL.TO',
       skippedYahoo: true,
       finnhubError: StateError('Finnhub quote HTTP 403 for AAPL.TO'),
     );
-    expect(error.toString(), contains('Yahoo is blocked in the browser'));
-    expect(error.toString(), contains('Finnhub 403 for AAPL.TO'));
-    expect(error.toString(), contains('TSX'));
-    expect(error.toString(), isNot(contains('query1.finance.yahoo.com')));
-    expect(
-      QuoteUnavailable.shortMessage(
-        StateError(
-          'Yahoo failed (ClientException: Failed to fetch, '
-          'https://query1.finance.yahoo.com/v8/finance/chart/AAPL.TO'
-          '?interval=1d&range=1mo); Finnhub failed '
-          '(StateError: Finnhub quote HTTP 403 for AAPL.TO)',
-        ),
-      ),
-      contains('Toronto listing'),
+    expect(tsx.toString(), contains('Browser CORS blocks Yahoo'));
+    expect(tsx.toString(), contains('Finnhub 403 for AAPL.TO'));
+    expect(tsx.toString(), contains('TSX'));
+    expect(tsx.toString(), isNot(contains('query1.finance.yahoo.com')));
+    expect(tsx.toString(), isNot(contains('Yahoo is blocked')));
+
+    final swiss = QuoteUnavailable(
+      symbol: 'NESN.SW',
+      skippedYahoo: true,
+      finnhubError: StateError('Finnhub quote HTTP 403 for NESN.SW'),
     );
-    expect(
-      QuoteUnavailable.shortMessage(
-        StateError(
-          'Yahoo failed (ClientException: Failed to fetch, '
-          'https://query1.finance.yahoo.com/v8/finance/chart/AAPL.TO'
-          '?interval=1d&range=1mo); Finnhub failed '
-          '(StateError: Finnhub quote HTTP 403 for AAPL.TO)',
-        ),
+    expect(swiss.toString(), contains('Browser CORS blocks Yahoo'));
+    expect(swiss.toString(), contains('Finnhub 403 for NESN.SW'));
+    expect(swiss.toString(), contains('SIX Swiss'));
+    expect(swiss.toString(), isNot(contains('query1.finance.yahoo.com')));
+    expect(QuoteUnavailable.isSwissListing('NESN.SW'), isTrue);
+    expect(QuoteUnavailable.finnhubPackageLabel('NESN.SW'), 'SIX Swiss');
+
+    final dumped = QuoteUnavailable.shortMessage(
+      StateError(
+        'Yahoo failed (ClientException: Failed to fetch, '
+        'https://query1.finance.yahoo.com/v8/finance/chart/NESN.SW'
+        '?interval=1d&range=1mo); Finnhub failed '
+        '(StateError: Finnhub quote HTTP 403 for NESN.SW)',
       ),
-      isNot(contains('query1.finance.yahoo.com')),
     );
+    expect(dumped, contains('Browser CORS blocks Yahoo'));
+    expect(dumped, contains('non-US'));
+    expect(dumped, isNot(contains('query1.finance.yahoo.com')));
+    expect(dumped, isNot(contains('Yahoo is blocked')));
   });
 
   test('web Finnhub 403 without daily fallback throws QuoteUnavailable', () async {

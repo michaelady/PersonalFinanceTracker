@@ -179,6 +179,15 @@ void main() {
     expect(quote.source, 'finnhub');
     expect(quote.price, closeTo(325.13, 0.0001));
     expect(quote.changePercent, closeTo(1.25, 0.0001));
+    expect(quote.previousClose, closeTo(321.12, 0.0001));
+    expect(
+      FinnhubQuoteClient.sessionPreviousCloseFromQuote(
+        price: 150.29,
+        previousClose: null,
+        change: -16.95,
+      ),
+      closeTo(167.24, 0.0001),
+    );
     expect(
       FinnhubQuoteClient.parseCandle({
         's': 'ok',
@@ -372,6 +381,222 @@ void main() {
     expect(bundle.quote.previousClose, closeTo(130, 0.0001));
     expect(bundle.history, isEmpty);
     expect(finnhub.candlesUnavailableOnPlan, isTrue);
+  });
+
+  test('Alpha Vantage maps Yahoo .TO to .TRT', () {
+    expect(AlphaVantageHistoryClient.symbolFor('AAPL.TO'), 'AAPL.TRT');
+    expect(AlphaVantageHistoryClient.symbolFor('msft.to'), 'MSFT.TRT');
+    expect(AlphaVantageHistoryClient.symbolFor('SHOP.V'), 'SHOP.TRV');
+    expect(AlphaVantageHistoryClient.symbolFor('VTI'), 'VTI');
+  });
+
+  test('skipYahoo does not call Yahoo and uses Finnhub', () async {
+    var yahooHits = 0;
+    final client = MockClient((request) async {
+      if (request.url.host.contains('yahoo')) {
+        yahooHits++;
+        throw http.ClientException('Failed to fetch', request.url);
+      }
+      if (request.url.path.contains('/quote')) {
+        return http.Response(
+          jsonEncode({'c': 325.13, 'd': 4.01, 'dp': 1.25, 'pc': 321.12}),
+          200,
+        );
+      }
+      if (request.url.path.contains('/candle')) {
+        return http.Response(
+          jsonEncode({
+            's': 'ok',
+            'c': [321.12, 325.13],
+            't': [1725148800, 1725235200],
+          }),
+          200,
+        );
+      }
+      fail('Unexpected ${request.url}');
+    });
+    final composite = CompositeQuoteClient(
+      yahoo: YahooQuoteClient(client: client),
+      skipYahoo: true,
+      finnhub: FinnhubQuoteClient(token: 'user-local-only', client: client),
+    );
+    final bundle = await composite.fetchChart('AAPL');
+    expect(yahooHits, 0);
+    expect(bundle.quote.source, 'finnhub');
+    expect(bundle.quote.previousClose, closeTo(321.12, 0.0001));
+  });
+
+  test('Finnhub quote 403 on .TO uses Alpha Vantage .TRT last close as Day prev',
+      () async {
+    final now = DateTime.now().toUtc();
+    late http.Request avSeen;
+    final client = MockClient((request) async {
+      if (request.url.host.contains('yahoo')) {
+        fail('Yahoo must not be called when skipYahoo is true');
+      }
+      if (request.url.path.contains('/quote')) {
+        return http.Response('{"error":"You don\'t have access"}', 403);
+      }
+      if (request.url.host.contains('alphavantage')) {
+        avSeen = request;
+        return http.Response(
+          jsonEncode(_alphaVantageDaily({
+            _ymd(now.subtract(const Duration(days: 3))): '46.78',
+            _ymd(now.subtract(const Duration(days: 1))): '47.03',
+          })),
+          200,
+        );
+      }
+      fail('Unexpected ${request.url}');
+    });
+    final composite = CompositeQuoteClient(
+      yahoo: YahooQuoteClient(client: client),
+      skipYahoo: true,
+      finnhub: FinnhubQuoteClient(token: 'free-token', client: client),
+      alphaVantage: AlphaVantageHistoryClient(
+        apiKey: 'test-av-key',
+        client: client,
+        minRequestGap: Duration.zero,
+      ),
+    );
+    final bundle = await composite.fetchChart('AAPL.TO');
+    expect(avSeen.url.queryParameters['symbol'], 'AAPL.TRT');
+    expect(bundle.quote.source, 'alphavantage');
+    expect(bundle.quote.currency, 'CAD');
+    expect(bundle.quote.price, closeTo(47.03, 0.0001));
+    expect(bundle.quote.previousClose, closeTo(46.78, 0.0001));
+    expect(bundle.quote.price - bundle.quote.previousClose!, greaterThan(0));
+  });
+
+  test('QuoteUnavailable copy names CORS and TSX 403 without Yahoo URLs', () {
+    final error = QuoteUnavailable(
+      symbol: 'AAPL.TO',
+      skippedYahoo: true,
+      finnhubError: StateError('Finnhub quote HTTP 403 for AAPL.TO'),
+    );
+    expect(error.toString(), contains('Yahoo is blocked in the browser'));
+    expect(error.toString(), contains('Finnhub 403 for AAPL.TO'));
+    expect(error.toString(), contains('TSX'));
+    expect(error.toString(), isNot(contains('query1.finance.yahoo.com')));
+    expect(
+      QuoteUnavailable.shortMessage(
+        StateError(
+          'Yahoo failed (ClientException: Failed to fetch, '
+          'https://query1.finance.yahoo.com/v8/finance/chart/AAPL.TO'
+          '?interval=1d&range=1mo); Finnhub failed '
+          '(StateError: Finnhub quote HTTP 403 for AAPL.TO)',
+        ),
+      ),
+      contains('Toronto listing'),
+    );
+    expect(
+      QuoteUnavailable.shortMessage(
+        StateError(
+          'Yahoo failed (ClientException: Failed to fetch, '
+          'https://query1.finance.yahoo.com/v8/finance/chart/AAPL.TO'
+          '?interval=1d&range=1mo); Finnhub failed '
+          '(StateError: Finnhub quote HTTP 403 for AAPL.TO)',
+        ),
+      ),
+      isNot(contains('query1.finance.yahoo.com')),
+    );
+  });
+
+  test('web Finnhub 403 without daily fallback throws QuoteUnavailable', () async {
+    final client = MockClient((request) async {
+      if (request.url.path.contains('/quote')) {
+        return http.Response('nope', 403);
+      }
+      fail('Unexpected ${request.url}');
+    });
+    final composite = CompositeQuoteClient(
+      yahoo: YahooQuoteClient(client: client),
+      skipYahoo: true,
+      finnhub: FinnhubQuoteClient(token: 'free-token', client: client),
+    );
+    expect(
+      () => composite.fetchChart('AAPL.TO'),
+      throwsA(
+        isA<QuoteUnavailable>().having(
+          (e) => e.toString(),
+          'message',
+          contains('TSX'),
+        ),
+      ),
+    );
+  });
+
+  test('mergeFetchedQuote drops Yahoo 1mo history when source flips to Finnhub',
+      () {
+    final yahoo = CachedQuote(
+      symbol: 'TSLA',
+      price: 363.10,
+      currency: 'USD',
+      fetchedAt: DateTime.utc(2026, 9, 14, 16),
+      source: 'yahoo',
+      changePercent: -0.64,
+      previousClose: 342.27,
+      history: {
+        '1mo': [
+          PricePoint(date: DateTime.utc(2026, 8, 14), close: 342.27),
+          PricePoint(date: DateTime.utc(2026, 9, 11), close: 365.44),
+          PricePoint(date: DateTime.utc(2026, 9, 14), close: 363.10),
+        ],
+      },
+      historyFetchedAt: {'1mo': DateTime.utc(2026, 9, 14, 16)},
+    );
+    final finnhub = CachedQuote(
+      symbol: 'TSLA',
+      price: 362.53,
+      currency: 'USD',
+      fetchedAt: DateTime.utc(2026, 9, 14, 17),
+      source: 'finnhub',
+      changePercent: -0.796,
+      previousClose: 365.44,
+    );
+    final merged = mergeFetchedQuote(
+      yahoo,
+      QuoteBundle(quote: finnhub, range: QuoteHistoryRange.oneMonth),
+    );
+    expect(merged.source, 'finnhub');
+    expect(merged.previousClose, closeTo(365.44, 0.0001));
+    expect(merged.history, isEmpty);
+    expect(merged.historyFetchedAt, isEmpty);
+  });
+
+  test('mergeFetchedQuote keeps same-source history', () {
+    final previous = CachedQuote(
+      symbol: 'AAPL',
+      price: 320,
+      currency: 'USD',
+      fetchedAt: DateTime.utc(2026, 9, 14, 16),
+      source: 'finnhub',
+      previousClose: 318,
+      history: {
+        '1y': [
+          PricePoint(date: DateTime.utc(2026, 8, 1), close: 300),
+          PricePoint(date: DateTime.utc(2026, 9, 14), close: 320),
+        ],
+      },
+      historyFetchedAt: {'1y': DateTime.utc(2026, 9, 14, 16)},
+    );
+    final next = CachedQuote(
+      symbol: 'AAPL',
+      price: 325.13,
+      currency: 'USD',
+      fetchedAt: DateTime.utc(2026, 9, 14, 17),
+      source: 'finnhub',
+      previousClose: 321.12,
+    );
+    final merged = mergeFetchedQuote(
+      previous,
+      QuoteBundle(
+        quote: next,
+        range: QuoteHistoryRange.oneMonth,
+      ),
+    );
+    expect(merged.price, closeTo(325.13, 0.0001));
+    expect(merged.history['1y'], hasLength(2));
   });
 
   test('Alpha Vantage parser reads daily closes oldest-first and trims to 1y',

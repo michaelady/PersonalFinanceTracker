@@ -443,6 +443,7 @@ class FinanceRepository extends ChangeNotifier {
         _compositeTwelveDataToken != twelveDataToken) {
       _compositeClient = CompositeQuoteClient.fromTokens(
         yahoo: yahoo,
+        skipYahoo: kIsWeb,
         userToken: finnhubToken,
         alphaVantageUserToken: alphaVantageToken,
         twelveDataUserToken: twelveDataToken,
@@ -1296,6 +1297,7 @@ class FinanceRepository extends ChangeNotifier {
 
     var fetched = 0;
     String? lastSource;
+    Object? lastError;
     final failures = <String>[];
     try {
       for (var i = 0; i < tickers.length; i++) {
@@ -1303,7 +1305,16 @@ class FinanceRepository extends ChangeNotifier {
         final cached = quotes[ticker];
         final quoteFresh =
             cached != null && PortfolioMath.quoteIsFresh(cached.fetchedAt);
-        if (!force && cached != null && quoteFresh && _historyCacheFresh(cached, range)) {
+        final stalePrev = cached != null &&
+            PortfolioMath.previousCloseLooksLikeRangeStart(
+              cached,
+              cached.previousClose,
+            );
+        if (!force &&
+            cached != null &&
+            quoteFresh &&
+            _historyCacheFresh(cached, range) &&
+            !stalePrev) {
           lastSource = cached.source;
           continue;
         }
@@ -1312,15 +1323,16 @@ class FinanceRepository extends ChangeNotifier {
               await _quoteClient.fetchChart(ticker, range: range);
           quotes = {
             ...quotes,
-            ticker: _mergeQuote(cached, bundle),
+            ticker: mergeFetchedQuote(cached, bundle),
           };
           _ensureRateFor(bundle.quote.currency);
           lastSource = bundle.quote.source;
           fetched++;
         } catch (e) {
           failures.add(ticker);
+          lastError = e;
           if (cached == null) {
-            quotesError ??= e.toString();
+            quotesError ??= QuoteUnavailable.shortMessage(e);
           }
         }
         if (i != tickers.length - 1) {
@@ -1330,36 +1342,31 @@ class FinanceRepository extends ChangeNotifier {
       if (fetched > 0) {
         quotesUpdatedAt = DateTime.now().toUtc();
         quotesSource = lastSource;
-        if (failures.isEmpty) quotesError = null;
+        if (failures.isEmpty) {
+          quotesError = null;
+        } else {
+          quotesError ??=
+              'Could not refresh ${failures.join(', ')} — showing last saved prices.';
+        }
         await _store.saveQuotes(quotes);
       } else if (failures.isNotEmpty && quotes.values.isNotEmpty) {
-        quotesError =
-            'Could not refresh quotes — showing last saved prices.';
+        final detail =
+            lastError == null ? null : QuoteUnavailable.shortMessage(lastError);
+        quotesError = [
+          'Could not refresh quotes — showing last saved prices.',
+          ?detail,
+        ].join(' ');
       } else if (failures.isNotEmpty) {
         quotesError = resolveFinnhubToken(userToken: finnhubToken) == null
-            ? 'Quotes unavailable. On the website, add a free Finnhub token in Settings.'
-            : 'Could not refresh quotes.';
+            ? 'Quotes unavailable. On the website, add a free Finnhub token in Settings. Yahoo is blocked in the browser.'
+            : (lastError == null
+                ? 'Could not refresh quotes.'
+                : QuoteUnavailable.shortMessage(lastError));
       }
     } finally {
       quotesRefreshing = false;
       notifyListeners();
     }
-  }
-
-  CachedQuote _mergeQuote(CachedQuote? previous, QuoteBundle bundle) {
-    final next = bundle.quote;
-    if (previous == null) return next;
-    final history = {...previous.history, ...next.history};
-    final fetched = {...previous.historyFetchedAt, ...next.historyFetchedAt};
-    final range = bundle.range;
-    // A per-minute Alpha Vantage miss omits this range's stamp so retries are
-    // not blocked for the whole quote TTL. Do not resurrect a previous stamp.
-    if (range != null &&
-        !next.historyFetchedAt.containsKey(range.key) &&
-        (next.history[range.key]?.length ?? 0) < 2) {
-      fetched.remove(range.key);
-    }
-    return next.copyWith(history: history, historyFetchedAt: fetched);
   }
 
   /// Skip a network fetch when this range (or a longer cached series) is fresh.

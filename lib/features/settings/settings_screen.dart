@@ -416,8 +416,11 @@ class SettingsScreen extends StatelessWidget {
             const Text(
               'Optional. Stored only on this device — never synced or exported. '
               'The website may already have a default key; a personal key still '
-              'overrides it. Get a free key at finnhub.io. Leave blank to use '
-              'the default (if any). Android and Windows use Yahoo Finance directly.',
+              'overrides it. Get a free key at finnhub.io. Free keys quote US '
+              'symbols; Toronto (.TO) needs Finnhub\'s Canadian package and '
+              'returns HTTP 403 otherwise. Leave blank to use the default (if '
+              'any). Android and Windows use Yahoo Finance directly — Yahoo is '
+              'blocked in the browser (CORS), and there is no quote-provider switch.',
             ),
             const SizedBox(height: 12),
             TextField(

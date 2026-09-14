@@ -368,6 +368,36 @@ void main() {
     expect(dayText.style?.color, ZenthoColors.coral);
   });
 
+  testWidgets('portfolio card says mixed sources when Yahoo and Finnhub both quote',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHoldings(withHistory: false);
+    final now = DateTime.now().toUtc();
+    repo.quotes = {
+      'AAPL': CachedQuote(
+        symbol: 'AAPL',
+        price: 90,
+        currency: 'USD',
+        fetchedAt: now,
+        source: 'yahoo',
+        previousClose: 100,
+        changePercent: -10,
+      ),
+      'MSFT': CachedQuote(
+        symbol: 'MSFT',
+        price: 80,
+        currency: 'USD',
+        fetchedAt: now.subtract(const Duration(seconds: 1)),
+        source: 'finnhub',
+        previousClose: 90,
+        changePercent: -11.111,
+      ),
+    };
+    repo.notifyListeners();
+    await pumpInvestments(tester, repo);
+    expect(find.textContaining('mixed sources'), findsOneWidget);
+  });
+
   test('performance empty copy does not say offline when a last price exists',
       () {
     expect(

@@ -357,12 +357,35 @@ class AlphaVantageHistoryClient {
   /// Free plan: 5 history calls per minute. Space HTTP starts by 12s.
   static const defaultMinRequestGap = Duration(seconds: 12);
 
-  /// Yahoo/Finnhub `.TO` is TSX; Alpha Vantage wants `.TRT` (see SHOP.TRT).
-  /// `.V` (TSXV) maps to `.TRV`. US and other Yahoo suffixes are unchanged.
+  /// Yahoo/Finnhub suffix → Alpha Vantage `TIME_SERIES_DAILY` suffix.
+  ///
+  /// Free Finnhub often 403s these (US quotes only). AV uses different
+  /// exchange codes than Yahoo:
+  /// - TSX `.TO` → `.TRT` (SHOP.TRT)
+  /// - TSXV `.V` → `.TRV`
+  /// - SIX Swiss `.SW` → `.SWI` (NESN.SWI)
+  /// - LSE `.L` → `.LON`
+  /// - Euronext Amsterdam `.AS` → `.AMS`
+  ///
+  /// Unlisted suffixes stay as-is (Twelve Data still uses the Yahoo form).
+  static const yahooToAlphaVantageSuffix = {
+    '.TO': '.TRT',
+    '.SW': '.SWI',
+    '.AS': '.AMS',
+    '.L': '.LON',
+    '.V': '.TRV',
+  };
+
   static String symbolFor(String yahooOrFinnhub) {
     final s = yahooOrFinnhub.trim().toUpperCase();
-    if (s.endsWith('.TO')) return '${s.substring(0, s.length - 3)}.TRT';
-    if (s.endsWith('.V')) return '${s.substring(0, s.length - 2)}.TRV';
+    final suffixes = yahooToAlphaVantageSuffix.keys.toList()
+      ..sort((a, b) => b.length.compareTo(a.length));
+    for (final yahoo in suffixes) {
+      if (s.endsWith(yahoo) && s.length > yahoo.length) {
+        return '${s.substring(0, s.length - yahoo.length)}'
+            '${yahooToAlphaVantageSuffix[yahoo]}';
+      }
+    }
     return s;
   }
 
@@ -918,6 +941,28 @@ class QuoteUnavailable implements Exception {
     return s.endsWith('.TO') || s.endsWith('.V');
   }
 
+  static bool isSwissListing(String symbol) {
+    return symbol.trim().toUpperCase().endsWith('.SW');
+  }
+
+  /// Dotted Yahoo/Finnhub tickers (`.TO`, `.SW`, `.L`, …). Free Finnhub is
+  /// US-only and typically 403s these.
+  static bool isNonUsListing(String symbol) {
+    final s = symbol.trim().toUpperCase();
+    final dot = s.lastIndexOf('.');
+    return dot > 0 && dot < s.length - 1;
+  }
+
+  /// Exchange name for Finnhub 403 copy when the suffix is a known package.
+  static String? finnhubPackageLabel(String symbol) {
+    final s = symbol.trim().toUpperCase();
+    if (isTorontoListing(s)) return 'TSX';
+    if (isSwissListing(s)) return 'SIX Swiss';
+    if (s.endsWith('.L')) return 'LSE';
+    if (s.endsWith('.AS')) return 'Euronext Amsterdam';
+    return null;
+  }
+
   static bool isYahooBrowserBlock(Object? error) {
     if (error == null) return false;
     final t = error.toString();
@@ -930,18 +975,18 @@ class QuoteUnavailable implements Exception {
     return error.toString().contains('Finnhub quote HTTP 403');
   }
 
-  /// Compact copy for the portfolio source line.
+  /// Compact copy for the portfolio source line. Never dumps a Yahoo URL.
   static String shortMessage(Object error) {
     if (error is QuoteUnavailable) return error.toString();
     final t = error.toString();
-    if (isYahooBrowserBlock(error) &&
-        isFinnhubQuoteForbidden(error) &&
-        (t.contains('.TO') || t.contains('.V'))) {
-      return 'Yahoo is blocked in the browser. Finnhub 403 for a Toronto listing (free key has no TSX package).';
+    final cors = isYahooBrowserBlock(error) ||
+        t.contains('query1.finance.yahoo.com');
+    final fh403 = isFinnhubQuoteForbidden(error);
+    if (cors && fh403) {
+      return 'Browser CORS blocks Yahoo. Finnhub 403 for a non-US listing '
+          '(free key is US-only).';
     }
-    if (isYahooBrowserBlock(error)) {
-      return 'Yahoo is blocked in the browser.';
-    }
+    if (cors) return 'Browser CORS blocks Yahoo.';
     if (t.length > 160) return '${t.substring(0, 157)}...';
     return t;
   }
@@ -950,14 +995,17 @@ class QuoteUnavailable implements Exception {
   String toString() {
     final bits = <String>[];
     if (skippedYahoo || isYahooBrowserBlock(yahooError)) {
-      bits.add('Yahoo is blocked in the browser');
+      bits.add('Browser CORS blocks Yahoo');
     }
     if (isFinnhubQuoteForbidden(finnhubError)) {
-      bits.add(
-        isTorontoListing(symbol)
-            ? 'Finnhub 403 for $symbol (free key has no TSX package)'
-            : 'Finnhub 403 for $symbol',
-      );
+      final label = finnhubPackageLabel(symbol);
+      if (label != null) {
+        bits.add('Finnhub 403 for $symbol (free key has no $label package)');
+      } else if (isNonUsListing(symbol)) {
+        bits.add('Finnhub 403 for $symbol (free key is US-only)');
+      } else {
+        bits.add('Finnhub 403 for $symbol');
+      }
     } else if (finnhubError != null) {
       bits.add('Finnhub failed for $symbol');
     }
@@ -1112,7 +1160,7 @@ class CompositeQuoteClient implements QuoteClient {
   }
 
   /// Last completed daily close as last price when Finnhub's quote 403s
-  /// (typical for `.TO` on a free key). Not a live Yahoo session.
+  /// (typical for `.TO` / `.SW` on a free key). Not a live Yahoo session.
   Future<QuoteBundle?> _lastPriceFromDailyHistory(
     String symbol,
     QuoteHistoryRange range,

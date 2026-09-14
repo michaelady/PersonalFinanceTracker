@@ -323,9 +323,9 @@ class _EmptyState extends StatelessWidget {
             'because Yahoo does not send CORS headers — GitHub Pages cannot '
             'fix that, and Zentho does not use a CORS proxy. US tickers may '
             'already use a default Finnhub key (Settings can override it). '
-            'Toronto (.TO) listings 403 on free Finnhub (Canadian package); '
-            'the site then tries Alpha Vantage / Twelve Data daily closes. '
-            'Last successful prices stay on this device.',
+            'Free Finnhub is US-only, so Toronto (.TO) and Swiss (.SW) quotes '
+            '403; the site then tries Alpha Vantage / Twelve Data last and '
+            'previous close. Last successful prices stay on this device.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
         ],

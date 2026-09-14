@@ -1296,6 +1296,7 @@ class FinanceRepository extends ChangeNotifier {
     notifyListeners();
 
     var fetched = 0;
+    var keptFresh = 0;
     String? lastSource;
     Object? lastError;
     final failures = <String>[];
@@ -1316,6 +1317,7 @@ class FinanceRepository extends ChangeNotifier {
             _historyCacheFresh(cached, range) &&
             !stalePrev) {
           lastSource = cached.source;
+          keptFresh++;
           continue;
         }
         try {
@@ -1329,11 +1331,9 @@ class FinanceRepository extends ChangeNotifier {
           lastSource = bundle.quote.source;
           fetched++;
         } catch (e) {
+          // Keep going — one 403 must not abort US lots in the same book.
           failures.add(ticker);
           lastError = e;
-          if (cached == null) {
-            quotesError ??= QuoteUnavailable.shortMessage(e);
-          }
         }
         if (i != tickers.length - 1) {
           await Future<void>.delayed(_quotePause);
@@ -1342,26 +1342,29 @@ class FinanceRepository extends ChangeNotifier {
       if (fetched > 0) {
         quotesUpdatedAt = DateTime.now().toUtc();
         quotesSource = lastSource;
-        if (failures.isEmpty) {
-          quotesError = null;
-        } else {
-          quotesError ??=
-              'Could not refresh ${failures.join(', ')} — showing last saved prices.';
-        }
         await _store.saveQuotes(quotes);
-      } else if (failures.isNotEmpty && quotes.values.isNotEmpty) {
+      }
+      if (failures.isEmpty) {
+        quotesError = null;
+      } else {
         final detail =
             lastError == null ? null : QuoteUnavailable.shortMessage(lastError);
-        quotesError = [
-          'Could not refresh quotes — showing last saved prices.',
-          ?detail,
-        ].join(' ');
-      } else if (failures.isNotEmpty) {
-        quotesError = resolveFinnhubToken(userToken: finnhubToken) == null
-            ? 'Quotes unavailable. On the website, add a free Finnhub token in Settings. Yahoo is blocked in the browser.'
-            : (lastError == null
-                ? 'Could not refresh quotes.'
-                : QuoteUnavailable.shortMessage(lastError));
+        final someOk = fetched > 0 || keptFresh > 0;
+        if (someOk) {
+          quotesError = [
+            'Could not refresh ${failures.join(', ')} — showing last saved prices.',
+            ?detail,
+          ].join(' ');
+        } else if (quotes.values.isNotEmpty) {
+          quotesError = [
+            'Could not refresh quotes — showing last saved prices.',
+            ?detail,
+          ].join(' ');
+        } else {
+          quotesError = resolveFinnhubToken(userToken: finnhubToken) == null
+              ? 'Quotes unavailable. On the website, add a free Finnhub token in Settings. Browser CORS blocks Yahoo.'
+              : (detail ?? 'Could not refresh quotes.');
+        }
       }
     } finally {
       quotesRefreshing = false;

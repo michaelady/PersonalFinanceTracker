@@ -232,6 +232,106 @@ void main() {
       expect(totals.marketMain, closeTo(180, 0.0001));
     });
 
+    test('positive unrealized P/L is not used as the day change', () {
+      final holding = lot(ticker: 'VTI', shares: 4, cost: 200);
+      final totals = PortfolioMath.summarize(
+        holdings: [holding],
+        quotes: {
+          'VTI': quote(
+            symbol: 'VTI',
+            price: 375,
+            previousClose: 380,
+            changePercent: -1.3158,
+          ),
+        },
+        mainCurrency: 'USD',
+        rates: rates,
+      );
+      expect(totals.unrealizedPlMain, closeTo(4 * (375 - 200), 0.01));
+      expect(totals.unrealizedPlMain, isPositive);
+      expect(totals.dayChangeMain, closeTo(4 * (375 - 380), 0.01));
+      expect(totals.dayChangeMain, isNegative);
+    });
+
+    test('live VTI/TSLA/NESN mix stays down vs session close, not 1mo start',
+        () {
+      // Live Invest tab names (2026-09-14). TSLA and NESN.SW flip sign if
+      // chartPreviousClose (1mo range start) is treated as yesterday.
+      const chfToUsd = 1.25;
+      const cadToUsd = 0.7;
+      final tsla = lot(ticker: 'TSLA', shares: 10, cost: 300);
+      final nestle = lot(
+        ticker: 'NESN.SW',
+        shares: 2,
+        cost: 70,
+        currency: 'CHF',
+      );
+      final msftTo = lot(
+        ticker: 'MSFT.TO',
+        shares: 5,
+        cost: 30,
+        currency: 'USD',
+      );
+      final quotes = {
+        'TSLA': quote(
+          symbol: 'TSLA',
+          price: 363.10,
+          previousClose: 342.27,
+          changePercent: -0.640,
+        ),
+        'NESN.SW': quote(
+          symbol: 'NESN.SW',
+          price: 79.20,
+          currency: 'CHF',
+          previousClose: 81.01,
+          changePercent: 2.141,
+        ),
+        'MSFT.TO': quote(
+          symbol: 'MSFT.TO',
+          price: 35.31,
+          currency: 'CAD',
+          previousClose: 34.67,
+          changePercent: 1.934,
+        ),
+      };
+      final totals = PortfolioMath.summarize(
+        holdings: [tsla, nestle, msftTo],
+        quotes: quotes,
+        mainCurrency: 'USD',
+        rates: const [
+          CurrencyRate(code: 'USD', rateToMain: 1),
+          CurrencyRate(code: 'CAD', rateToMain: cadToUsd),
+          CurrencyRate(code: 'CHF', rateToMain: chfToUsd),
+        ],
+      );
+
+      const fx = [
+        CurrencyRate(code: 'USD', rateToMain: 1),
+        CurrencyRate(code: 'CAD', rateToMain: cadToUsd),
+        CurrencyRate(code: 'CHF', rateToMain: chfToUsd),
+      ];
+      var sessionDay = 0.0;
+      for (final h in [tsla, nestle, msftTo]) {
+        final q = quotes[h.ticker]!;
+        final prev = PortfolioMath.sessionPreviousClose(q)!;
+        sessionDay += PortfolioMath.toMain(
+          h.shares * (q.price - prev),
+          q.currency,
+          'USD',
+          fx,
+        );
+      }
+      final rangeStartDay = 10 * (363.10 - 342.27) +
+          2 * (79.20 - 81.01) * chfToUsd +
+          5 * (35.31 - 34.67) * cadToUsd;
+
+      expect(rangeStartDay, isPositive);
+      expect(sessionDay, isNegative);
+      expect(totals.dayChangeMain, closeTo(sessionDay, 0.0001));
+      expect(totals.dayChangeMain, isNegative);
+      expect(totals.unrealizedPlMain, isPositive);
+    });
+
     test('uses cost when a quote is missing and respects includeInNetWorth', () {
       final counted = lot(ticker: 'AAPL', shares: 2, cost: 50);
       final excluded = lot(

@@ -421,7 +421,9 @@ class _TotalsCard extends StatelessWidget {
                 ),
               if (portfolio.dayChangeMain != null)
                 _LabeledMoney(
-                  label: 'Day',
+                  label: portfolio.dayChangePercent == null
+                      ? 'Day'
+                      : 'Day ${portfolio.dayChangePercent!.toStringAsFixed(1)}%',
                   amount: portfolio.dayChangeMain!,
                   currency: currency,
                   signed: true,

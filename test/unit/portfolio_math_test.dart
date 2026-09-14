@@ -130,7 +130,106 @@ void main() {
         rates: rates,
       );
       expect(totals.dayChangeMain, closeTo(100, 0.0001));
+      expect(totals.dayChangePercent, closeTo(10, 0.0001));
       expect(totals.marketMain, closeTo(1100, 0.0001));
+    });
+
+    test('day change is negative when last is below previous close', () {
+      final holding = lot(ticker: 'SMTC', shares: 10, cost: 100);
+      final totals = PortfolioMath.summarize(
+        holdings: [holding],
+        quotes: {
+          'SMTC': quote(
+            symbol: 'SMTC',
+            price: 90,
+            previousClose: 100,
+            changePercent: -10,
+          ),
+        },
+        mainCurrency: 'USD',
+        rates: rates,
+      );
+      expect(totals.dayChangeMain, closeTo(-100, 0.0001));
+      expect(totals.dayChangePercent, closeTo(-10, 0.0001));
+      expect(totals.holdings.single.dayChangeMain, closeTo(-100, 0.0001));
+      expect(totals.holdings.single.dayChangePercent, closeTo(-10, 0.0001));
+      expect(totals.dayChangeMain, isNegative);
+    });
+
+    test('Yahoo chartPreviousClose cannot flip a down day to a gain', () {
+      // Same live shape as the Investments "Day +CHF" report: last 150.29,
+      // yesterday 167.24, 1mo chartPreviousClose 140.35.
+      final holding = lot(ticker: 'SMTC', shares: 10, cost: 140);
+      final q = quote(
+        symbol: 'SMTC',
+        price: 150.29,
+        previousClose: 140.35,
+        changePercent: -10.135,
+      ).copyWith(
+        history: {
+          '1mo': [
+            PricePoint(date: DateTime.utc(2026, 8, 14), close: 140.35),
+            PricePoint(date: DateTime.utc(2026, 9, 11), close: 167.24),
+            PricePoint(date: DateTime.utc(2026, 9, 14), close: 150.29),
+          ],
+        },
+      );
+      final totals = PortfolioMath.summarize(
+        holdings: [holding],
+        quotes: {'SMTC': q},
+        mainCurrency: 'USD',
+        rates: rates,
+      );
+      final fromChartRange = 10 * (150.29 - 140.35);
+      expect(fromChartRange, greaterThan(0));
+      expect(totals.dayChangeMain, closeTo(10 * (150.29 - 167.24), 0.01));
+      expect(totals.dayChangeMain, isNegative);
+      expect(totals.dayChangePercent, closeTo(-10.135, 0.01));
+    });
+
+    test('negative native day change stays negative after FX to main', () {
+      final holding = lot(
+        ticker: 'VWCE.DE',
+        shares: 5,
+        cost: 100,
+        currency: 'EUR',
+      );
+      final totals = PortfolioMath.summarize(
+        holdings: [holding],
+        quotes: {
+          'VWCE.DE': quote(
+            symbol: 'VWCE.DE',
+            price: 90,
+            currency: 'EUR',
+            previousClose: 100,
+            changePercent: -10,
+          ),
+        },
+        mainCurrency: 'USD',
+        rates: rates,
+      );
+      // 5 * (90 - 100) EUR = -50 EUR → -55 USD
+      expect(totals.dayChangeMain, closeTo(-55, 0.0001));
+      expect(totals.dayChangePercent, closeTo(-10, 0.0001));
+    });
+
+    test('cash is not mixed into portfolio day change', () {
+      final holding = lot(ticker: 'AAPL', shares: 2, cost: 100);
+      final totals = PortfolioMath.summarize(
+        holdings: [holding],
+        quotes: {
+          'AAPL': quote(
+            symbol: 'AAPL',
+            price: 90,
+            previousClose: 100,
+            changePercent: -10,
+          ),
+        },
+        mainCurrency: 'USD',
+        rates: rates,
+      );
+      expect(totals.dayChangeMain, closeTo(-20, 0.0001));
+      expect(totals.marketMain, closeTo(180, 0.0001));
     });
 
     test('uses cost when a quote is missing and respects includeInNetWorth', () {

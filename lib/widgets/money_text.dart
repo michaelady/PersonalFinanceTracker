@@ -38,7 +38,9 @@ class MoneyText extends StatelessWidget {
           ?.copyWith(
         color: amount < 0
             ? ZenthoColors.coral
-            : (emphasize ? ZenthoColors.tealDeep : null),
+            : (signed && amount > 0) || emphasize
+                ? ZenthoColors.tealDeep
+                : null,
         fontFeatures: const [FontFeature.tabularFigures()],
       ),
     );

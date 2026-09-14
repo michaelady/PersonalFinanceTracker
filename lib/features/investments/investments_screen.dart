@@ -421,7 +421,10 @@ class _TotalsCard extends StatelessWidget {
                 ),
               if (portfolio.dayChangeMain != null)
                 _LabeledMoney(
-                  label: 'Day',
+                  key: const Key('portfolio-day-change'),
+                  label: portfolio.dayChangePercent == null
+                      ? 'Day'
+                      : 'Day ${portfolio.dayChangePercent!.toStringAsFixed(1)}%',
                   amount: portfolio.dayChangeMain!,
                   currency: currency,
                   signed: true,
@@ -450,6 +453,7 @@ class _TotalsCard extends StatelessWidget {
 
 class _LabeledMoney extends StatelessWidget {
   const _LabeledMoney({
+    super.key,
     required this.label,
     required this.amount,
     required this.currency,

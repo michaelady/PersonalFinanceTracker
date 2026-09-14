@@ -126,9 +126,8 @@ class YahooQuoteClient implements QuoteClient {
       throw StateError('Yahoo chart missing regularMarketPrice for $ticker');
     }
     final currency = (meta['currency'] as String?)?.toUpperCase() ?? 'USD';
-    final changePct = (meta['regularMarketChangePercent'] as num?)?.toDouble();
-    final previous = (meta['chartPreviousClose'] as num?)?.toDouble() ??
-        (meta['previousClose'] as num?)?.toDouble();
+    final changePct = _metaNum(meta, 'regularMarketChangePercent') ??
+        _metaNum(meta, 'fulldayChangePercent');
 
     final timestamps = (result['timestamp'] as List?)
             ?.map((e) => (e as num).toInt())
@@ -159,6 +158,15 @@ class YahooQuoteClient implements QuoteClient {
     }
 
     final at = fetchedAt ?? DateTime.now().toUtc();
+    // `chartPreviousClose` is the first bar of `range` (e.g. ~1 month ago on
+    // 1mo), not yesterday. Using it as "day" previous close flips the sign
+    // whenever the book is up over the range and down today.
+    final previous = sessionPreviousCloseFromMeta(
+      meta,
+      price: price,
+      history: history,
+      fetchedAt: at,
+    );
     final quote = CachedQuote(
       symbol: (meta['symbol'] as String?)?.toUpperCase() ?? ticker,
       price: price,
@@ -194,6 +202,62 @@ class YahooQuoteClient implements QuoteClient {
       );
     }
     return out;
+  }
+
+  /// Yesterday / last regular session close from a v8 chart payload.
+  ///
+  /// Never returns `chartPreviousClose` — that field is the close before the
+  /// requested chart range, so a 1mo fetch yields ~last month, not last session.
+  static double? sessionPreviousCloseFromMeta(
+    Map<String, dynamic> meta, {
+    required double price,
+    List<PricePoint> history = const [],
+    DateTime? fetchedAt,
+  }) {
+    final regularPrev = _metaNum(meta, 'regularMarketPreviousClose');
+    if (regularPrev != null && regularPrev > 0) return regularPrev;
+
+    final chartPrev = _metaNum(meta, 'chartPreviousClose');
+    final listedPrev = _metaNum(meta, 'previousClose');
+    if (listedPrev != null &&
+        listedPrev > 0 &&
+        (chartPrev == null ||
+            !PortfolioMath.nearlySamePrice(listedPrev, chartPrev))) {
+      return listedPrev;
+    }
+
+    final change =
+        _metaNum(meta, 'regularMarketChange') ?? _metaNum(meta, 'fulldayChange');
+    if (change != null) {
+      final implied = price - change;
+      if (implied > 0) return implied;
+    }
+
+    final pct = _metaNum(meta, 'regularMarketChangePercent') ??
+        _metaNum(meta, 'fulldayChangePercent');
+    final fromPct = PortfolioMath.previousCloseFromChangePercent(price, pct);
+    if (fromPct != null) return fromPct;
+
+    return PortfolioMath.previousCloseFromHistory(
+      CachedQuote(
+        symbol: (meta['symbol'] as String?)?.toUpperCase() ?? '',
+        price: price,
+        currency: 'USD',
+        fetchedAt: fetchedAt ?? DateTime.now().toUtc(),
+        source: 'yahoo',
+        history: {
+          if (history.length >= 2) QuoteHistoryRange.oneMonth.key: history,
+        },
+      ),
+      now: fetchedAt,
+    );
+  }
+
+  static double? _metaNum(Map<String, dynamic> meta, String key) {
+    final value = meta[key];
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value);
+    return null;
   }
 }
 

@@ -144,6 +144,7 @@ class PortfolioTotals {
     this.unrealizedPlMain,
     this.unrealizedPlPercent,
     this.dayChangeMain,
+    this.dayChangePercent,
     this.quotedAt,
     this.quoteSource,
     this.usedCachedQuotes = false,
@@ -161,6 +162,7 @@ class PortfolioTotals {
   final double? unrealizedPlMain;
   final double? unrealizedPlPercent;
   final double? dayChangeMain;
+  final double? dayChangePercent;
   final DateTime? quotedAt;
   final String? quoteSource;
   final bool usedCachedQuotes;
@@ -525,15 +527,12 @@ abstract final class PortfolioMath {
     final pl = marketMain - costMain;
     final plPct = costMain == 0 ? null : (pl / costMain) * 100;
 
+    final previous = sessionPreviousClose(quote);
     double? dayChangeNative;
-    if (quote.previousClose != null) {
-      dayChangeNative = pos.shares * (quote.price - quote.previousClose!);
-    } else if (quote.changePercent != null) {
-      final denom = 1 + (quote.changePercent! / 100);
-      if (denom != 0) {
-        final previous = quote.price / denom;
-        dayChangeNative = pos.shares * (quote.price - previous);
-      }
+    double? dayPct;
+    if (previous != null && previous > 0) {
+      dayChangeNative = pos.shares * (quote.price - previous);
+      dayPct = ((quote.price - previous) / previous) * 100;
     }
 
     return finish(
@@ -548,7 +547,7 @@ abstract final class PortfolioMath {
       dayChangeMain: dayChangeNative == null
           ? null
           : toMain(dayChangeNative, quote.currency, mainCurrency, rates),
-      dayChangePercent: quote.changePercent,
+      dayChangePercent: dayPct,
     );
   }
 
@@ -576,6 +575,7 @@ abstract final class PortfolioMath {
     var netWorth = 0.0;
     var day = 0.0;
     var hasDay = false;
+    var previousMarket = 0.0;
     DateTime? latestQuote;
     String? source;
     var realized = 0.0;
@@ -594,6 +594,9 @@ abstract final class PortfolioMath {
       if (v.dayChangeMain != null) {
         day += v.dayChangeMain!;
         hasDay = true;
+        if (v.marketMain != null) {
+          previousMarket += v.marketMain! - v.dayChangeMain!;
+        }
       }
       if (v.quotedAt != null &&
           (latestQuote == null || v.quotedAt!.isAfter(latestQuote))) {
@@ -605,6 +608,9 @@ abstract final class PortfolioMath {
     final market = hasMarket ? marketKnown : cost;
     final pl = hasMarket ? market - cost : null;
     final plPct = (pl == null || cost == 0) ? null : (pl / cost) * 100;
+    final dayPct = (!hasDay || previousMarket.abs() <= qtyEpsilon)
+        ? null
+        : (day / previousMarket) * 100;
     final totalPl = (pl ?? 0) + realized + dividends;
     final totalPct = invested == 0 ? null : (totalPl / invested) * 100;
     final totalForAlloc = valued.fold<double>(
@@ -630,6 +636,7 @@ abstract final class PortfolioMath {
       unrealizedPlMain: pl,
       unrealizedPlPercent: plPct,
       dayChangeMain: hasDay ? day : null,
+      dayChangePercent: dayPct,
       quotedAt: latestQuote,
       quoteSource: source,
       usedCachedQuotes: quotes.isNotEmpty,
@@ -691,12 +698,100 @@ abstract final class PortfolioMath {
     return const [];
   }
 
+  /// Previous regular-session close for day P/L (Yahoo-style last vs
+  /// previous close). Prefers daily history and percent-implied previous
+  /// over [CachedQuote.previousClose] when that field is the chart-range
+  /// start (`chartPreviousClose` on a 1M/3M/1Y Yahoo chart), which can
+  /// flip the sign vs today's move.
+  static double? sessionPreviousClose(CachedQuote quote, {DateTime? now}) {
+    final stored =
+        quote.previousClose != null && quote.previousClose! > 0
+            ? quote.previousClose
+            : null;
+    final fromPct = previousCloseFromChangePercent(
+      quote.price,
+      quote.changePercent,
+    );
+    final fromHist = previousCloseFromHistory(quote, now: now);
+
+    if (stored != null &&
+        fromPct != null &&
+        !nearlySamePrice(stored, fromPct)) {
+      return fromHist ?? fromPct;
+    }
+    if (fromHist != null && stored != null) {
+      final closes = dailyCloses(quote);
+      if (closes.length >= 2 &&
+          nearlySamePrice(stored, closes.first.close) &&
+          !nearlySamePrice(stored, fromHist)) {
+        return fromHist;
+      }
+    }
+    return stored ?? fromPct ?? fromHist;
+  }
+
+  static double? previousCloseFromChangePercent(
+    double price,
+    double? changePercent,
+  ) {
+    if (changePercent == null) return null;
+    final denom = 1 + (changePercent / 100);
+    if (denom == 0) return null;
+    final implied = price / denom;
+    return implied > 0 ? implied : null;
+  }
+
+  static List<PricePoint> dailyCloses(CachedQuote quote) {
+    List<PricePoint>? best;
+    for (final key in [
+      QuoteHistoryRange.oneYear.key,
+      QuoteHistoryRange.threeMonths.key,
+      QuoteHistoryRange.oneMonth.key,
+    ]) {
+      final points = quote.history[key];
+      if (points != null &&
+          points.length >= 2 &&
+          (best == null || points.length > best.length)) {
+        best = points;
+      }
+    }
+    if (best == null) return const [];
+    final sorted = [...best]..sort((a, b) => a.date.compareTo(b.date));
+    return sorted;
+  }
+
+  static double? previousCloseFromHistory(
+    CachedQuote quote, {
+    DateTime? now,
+  }) {
+    final history = dailyCloses(quote);
+    if (history.length < 2) return null;
+    final last = history.last;
+    final prior = history[history.length - 2];
+    if (last.close <= 0) return prior.close > 0 ? prior.close : null;
+    if (nearlySamePrice(last.close, quote.price)) {
+      return prior.close > 0 ? prior.close : null;
+    }
+    final asOf = (now ?? quote.fetchedAt).toUtc();
+    if (!calendarDayUtc(last.date).isBefore(calendarDayUtc(asOf))) {
+      return prior.close > 0 ? prior.close : null;
+    }
+    return last.close;
+  }
+
+  static bool nearlySamePrice(double a, double b) {
+    final scale = a.abs() > b.abs() ? a.abs() : b.abs();
+    final rel = scale * 0.002;
+    final tol = rel > 0.005 ? rel : 0.005;
+    return (a - b).abs() <= (scale < 1e-9 ? 0.005 : tol);
+  }
+
   /// When daily history is missing, plot last session close vs last price.
   static List<PricePoint> twoPointFromQuote(
     CachedQuote quote, {
     DateTime? now,
   }) {
-    final prev = quote.previousClose;
+    final prev = sessionPreviousClose(quote, now: now);
     if (prev == null || prev <= 0 || quote.price <= 0) return const [];
     final end = (now ?? quote.fetchedAt).toUtc();
     return [

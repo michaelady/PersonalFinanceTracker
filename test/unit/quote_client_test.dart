@@ -17,6 +17,7 @@ void main() {
             'symbol': 'AAPL',
             'regularMarketPrice': 325.13,
             'regularMarketChangePercent': 1.25,
+            'fulldayChange': 4.01,
             'chartPreviousClose': 321.12,
           },
           'timestamp': [1725148800, 1725235200],
@@ -47,6 +48,60 @@ void main() {
     expect(bundle.quote.source, 'yahoo');
     expect(bundle.history, hasLength(2));
     expect(bundle.history.last.close, closeTo(325.13, 0.0001));
+  });
+
+  test('Yahoo parser uses session previous close, not chartPreviousClose', () {
+    // Live 1mo chart shape (SMTC, 2026-09-14): last is down on the day,
+    // chartPreviousClose is the Aug 14 range-start close.
+    final start = DateTime.utc(2026, 8, 14, 13, 30).millisecondsSinceEpoch ~/ 1000;
+    final yesterday =
+        DateTime.utc(2026, 9, 11, 13, 30).millisecondsSinceEpoch ~/ 1000;
+    final today =
+        DateTime.utc(2026, 9, 14, 13, 30).millisecondsSinceEpoch ~/ 1000;
+    final bundle = YahooQuoteClient.parseChart(
+      {
+        'chart': {
+          'result': [
+            {
+              'meta': {
+                'currency': 'USD',
+                'symbol': 'SMTC',
+                'regularMarketPrice': 150.29,
+                'regularMarketChangePercent': -10.135,
+                'fulldayChange': -16.95,
+                'fulldayChangePercent': -10.135,
+                'chartPreviousClose': 140.35,
+              },
+              'timestamp': [start, yesterday, today],
+              'indicators': {
+                'quote': [
+                  {
+                    'close': [140.35, 167.24, 150.29],
+                  },
+                ],
+              },
+            },
+          ],
+          'error': null,
+        },
+      },
+      ticker: 'SMTC',
+      range: QuoteHistoryRange.oneMonth,
+      fetchedAt: DateTime.utc(2026, 9, 14, 18, 18),
+    );
+    expect(bundle.quote.previousClose, closeTo(167.24, 0.0001));
+    expect(bundle.quote.previousClose, isNot(closeTo(140.35, 0.01)));
+    expect(bundle.quote.changePercent, closeTo(-10.135, 0.0001));
+    expect(
+      YahooQuoteClient.sessionPreviousCloseFromMeta(
+        {
+          'chartPreviousClose': 140.35,
+          'fulldayChange': -16.95,
+        },
+        price: 150.29,
+      ),
+      closeTo(167.24, 0.0001),
+    );
   });
 
   test('Yahoo chart parser skips a dummy 0 close at the start of the series', () {

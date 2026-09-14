@@ -7,6 +7,7 @@ import 'package:zentho/data/services/quote_client.dart';
 import 'package:zentho/domain/models/models.dart';
 import 'package:zentho/domain/services/portfolio_math.dart';
 import 'package:zentho/features/investments/investments_screen.dart';
+import 'package:zentho/theme/zentho_colors.dart';
 import 'package:zentho/widgets/money_text.dart';
 
 class _NoNetworkQuoteClient implements QuoteClient {
@@ -316,6 +317,55 @@ void main() {
       findsOneWidget,
     );
     expect(latestChartValue(tester), closeTo(320, 0.01));
+  });
+
+  testWidgets('portfolio Day is red when last is below previous close',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHoldings(withHistory: false);
+    final now = DateTime.now().toUtc();
+    repo.quotes = {
+      'AAPL': CachedQuote(
+        symbol: 'AAPL',
+        price: 90,
+        currency: 'USD',
+        fetchedAt: now,
+        source: 'test',
+        previousClose: 100,
+        changePercent: -10,
+      ),
+      'MSFT': CachedQuote(
+        symbol: 'MSFT',
+        price: 80,
+        currency: 'USD',
+        fetchedAt: now,
+        source: 'test',
+        previousClose: 90,
+        changePercent: -11.111,
+      ),
+    };
+    repo.notifyListeners();
+    await pumpInvestments(tester, repo);
+
+    final day = tester.widget<MoneyText>(
+      find.descendant(
+        of: find.byKey(const Key('portfolio-day-change')),
+        matching: find.byType(MoneyText),
+      ),
+    );
+    // 2*(90-100) + 1*(80-90) = -30; unrealized stays positive vs cost.
+    expect(day.amount, closeTo(-30, 0.0001));
+    expect(day.amount, isNegative);
+    expect(day.signed, isTrue);
+    expect(find.textContaining('Day'), findsOneWidget);
+    final dayText = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(const Key('portfolio-day-change')),
+        matching: find.byType(Text),
+      ).last,
+    );
+    expect(dayText.data, contains('−'));
+    expect(dayText.style?.color, ZenthoColors.coral);
   });
 
   test('performance empty copy does not say offline when a last price exists',

@@ -9,6 +9,7 @@ import '../../domain/services/money_math.dart';
 import '../../domain/services/ocr_service.dart';
 import '../../domain/services/supported_currencies.dart';
 import '../../theme/zentho_colors.dart';
+import '../../widgets/zentho_snackbar.dart';
 
 /// Entry points for scanning a bill/invoice into expense transactions.
 abstract final class BillScanFlow {
@@ -309,16 +310,13 @@ class _BillReviewScreenState extends State<BillReviewScreen> {
     final messenger = ScaffoldMessenger.of(context);
     Navigator.pop(context);
     messenger.showSnackBar(
-      SnackBar(
-        content: Text('Added ${selected.length} expense(s) from bill'),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () async {
-            for (final id in createdIds) {
-              await repo.deleteTransaction(id);
-            }
-          },
-        ),
+      undoSnackBar(
+        message: 'Added ${selected.length} expense(s) from bill',
+        onUndo: () async {
+          for (final id in createdIds) {
+            await repo.deleteTransaction(id);
+          }
+        },
       ),
     );
   }

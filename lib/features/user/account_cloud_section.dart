@@ -71,8 +71,7 @@ class AccountCloudSection extends StatelessWidget {
                   (repo.cloudAccountsAvailable
                       ? 'Sign in to sync accounts, transactions, budgets, '
                           'goals, and holdings.'
-                      : 'Online sync needs Firebase web config in '
-                          'firebase_options.dart.'),
+                      : 'Online sync is not available in this build.'),
             ),
           ),
           Align(

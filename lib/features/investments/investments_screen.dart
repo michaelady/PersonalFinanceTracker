@@ -174,11 +174,9 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Lots from your buy/sell history. Android and Windows use Yahoo '
-              'Finance quotes (unofficial, delayed, not advice). This website '
-              'cannot call Yahoo (browser CORS) — it uses Finnhub, then daily '
-              'closes. Average-cost basis; realized P/L from sells + dividends; '
-              'unrealized vs last price.',
+              'Lots from your buy/sell history. Average-cost basis; realized '
+              'P/L from sells and dividends; unrealized vs last price. Quotes '
+              'are delayed and not investment advice.',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 16),
@@ -313,19 +311,8 @@ class _EmptyState extends StatelessWidget {
           Text(
             'Add a ticker, record share transactions, or import a Yahoo '
             'Finance lots CSV. Quantity, cost basis, and P/L are derived from '
-            'the transaction list. Quotes come from Yahoo Finance — unofficial, '
-            'delayed, and not investment advice.',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Android and Windows fetch Yahoo directly. This website cannot, '
-            'because Yahoo does not send CORS headers — GitHub Pages cannot '
-            'fix that, and Zentho does not use a CORS proxy. US tickers may '
-            'already use a default Finnhub key (Settings can override it). '
-            'Free Finnhub is US-only, so Toronto (.TO) and Swiss (.SW) quotes '
-            '403; the site then tries Alpha Vantage / Twelve Data last and '
-            'previous close. Last successful prices stay on this device.',
+            'the transaction list. Quotes are delayed and not investment '
+            'advice; the last successful prices stay on this device.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
         ],
@@ -349,7 +336,6 @@ class _TotalsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final pl = portfolio.unrealizedPlMain;
     final asOf = portfolio.quotedAt;
-    final source = _sourceLabel(portfolio.quoteSource ?? repo.quotesSource);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
@@ -441,7 +427,6 @@ class _TotalsCard extends StatelessWidget {
             [
               if (asOf != null)
                 'Last price ${DateFormat.MMMd().add_jm().format(asOf.toLocal())}',
-              ?source,
               ?repo.quotesError,
             ].join(' · '),
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -975,18 +960,6 @@ String _shareTxTypeLabel(ShareTransactionType type) {
     ShareTransactionType.dividend => 'Dividend',
     ShareTransactionType.fee => 'Fee',
     ShareTransactionType.split => 'Split',
-  };
-}
-
-String? _sourceLabel(String? source) {
-  return switch (source) {
-    'yahoo' => 'Yahoo Finance',
-    'finnhub' => 'Finnhub',
-    'alphavantage' => 'Alpha Vantage',
-    'twelvedata' => 'Twelve Data',
-    'mixed' => 'mixed sources',
-    null => null,
-    _ => source,
   };
 }
 

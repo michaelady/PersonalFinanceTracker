@@ -150,11 +150,11 @@ class SettingsScreen extends StatelessWidget {
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.key_outlined),
-                title: const Text('Finnhub API token (optional)'),
+                title: const Text('Finnhub key (optional)'),
                 subtitle: Text(
-                    repo.finnhubToken != null && repo.finnhubToken!.isNotEmpty
-                        ? 'Saved on this device only — overrides the website default when browser CORS blocks Yahoo'
-                        : 'The website may already have a default key; a personal key still overrides it.',
+                  repo.finnhubToken != null && repo.finnhubToken!.isNotEmpty
+                      ? 'Saved on this device only'
+                      : 'Personal key for live stock quotes',
                 ),
                 trailing: const Icon(Icons.edit_outlined),
                 onTap: () => _editFinnhubToken(context, repo),
@@ -162,12 +162,12 @@ class SettingsScreen extends StatelessWidget {
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.show_chart_outlined),
-                title: const Text('Alpha Vantage API key (optional)'),
+                title: const Text('Alpha Vantage key (optional)'),
                 subtitle: Text(
                   repo.alphaVantageToken != null &&
                           repo.alphaVantageToken!.isNotEmpty
-                      ? 'Saved on this device only — used for web price history'
-                      : 'The website may already have a default key for daily history when Finnhub candles are blocked.',
+                      ? 'Saved on this device only'
+                      : 'Personal key for daily price history',
                 ),
                 trailing: const Icon(Icons.edit_outlined),
                 onTap: () => _editAlphaVantageToken(context, repo),
@@ -175,12 +175,12 @@ class SettingsScreen extends StatelessWidget {
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.timeline_outlined),
-                title: const Text('Twelve Data API key (optional)'),
+                title: const Text('Twelve Data key (optional)'),
                 subtitle: Text(
                   repo.twelveDataToken != null &&
                           repo.twelveDataToken!.isNotEmpty
-                      ? 'Saved on this device only — web chart fallback'
-                      : 'Website default (if any) is used when Alpha Vantage is blocked.',
+                      ? 'Saved on this device only'
+                      : 'Backup key for daily price history',
                 ),
                 trailing: const Icon(Icons.edit_outlined),
                 onTap: () => _editTwelveDataToken(context, repo),
@@ -219,7 +219,7 @@ class SettingsScreen extends StatelessWidget {
                 leading: const Icon(Icons.download_outlined),
                 title: const Text('Export all data (CSV)'),
                 subtitle: const Text(
-                  'Full backup plus ledger/balances sheets for spreadsheet debugging',
+                  'Full backup plus ledger and balances sheets for spreadsheets',
                 ),
                 onTap: () => _exportCsv(context, repo),
               ),
@@ -229,7 +229,7 @@ class SettingsScreen extends StatelessWidget {
                 title: const Text('Import CSV'),
                 subtitle: const Text(
                   'Full Zentho export (replaces all), bank CSV, or Yahoo '
-                  'Finance lots (Invest tab also has this import)',
+                  'Finance lots',
                 ),
                 onTap: () => _importCsv(context, repo),
               ),
@@ -269,7 +269,7 @@ class SettingsScreen extends StatelessWidget {
               Text(
                 'Offline-first · Google account syncs this device · '
                 'share household by invite link · '
-                'quotes from Yahoo Finance (Finnhub + Alpha Vantage + Twelve Data on web)',
+                'market quotes are delayed and not investment advice',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ],
@@ -408,20 +408,16 @@ class SettingsScreen extends StatelessWidget {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Finnhub API token'),
+        title: const Text('Finnhub key'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
               'Optional. Stored only on this device — never synced or exported. '
-              'The website may already have a default key; a personal key still '
-              'overrides it. Get a free key at finnhub.io. Free keys quote US '
-              'symbols. Non-US listings (TSX .TO, Swiss .SW, and similar) '
-              'return HTTP 403 without an exchange package; the site then tries '
-              'Alpha Vantage / Twelve Data daily closes. Leave blank to use the '
-              'default (if any). Android and Windows use Yahoo Finance directly '
-              '— browser CORS blocks Yahoo, and there is no quote-provider switch.',
+              'Get a free key at finnhub.io to enable live quotes. Free keys '
+              'cover US listings only; a paid plan is needed for other '
+              'exchanges. Leave blank to use the built-in default (if any).',
             ),
             const SizedBox(height: 12),
             TextField(
@@ -430,8 +426,8 @@ class SettingsScreen extends StatelessWidget {
               autocorrect: false,
               enableSuggestions: false,
               decoration: const InputDecoration(
-                labelText: 'Token',
-                hintText: 'Paste token',
+                labelText: 'Key',
+                hintText: 'Paste key',
               ),
             ),
           ],
@@ -470,16 +466,15 @@ class SettingsScreen extends StatelessWidget {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Alpha Vantage API key'),
+        title: const Text('Alpha Vantage key'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
               'Optional. Stored only on this device — never synced or exported. '
-              'Used for daily price history on the website when browser CORS '
-              'blocks Yahoo and Finnhub 403s non-US quotes or candles. Get a free key at '
-              'alphavantage.co. Leave blank to use the website default (if any).',
+              'Used for daily price history and charts. Get a free key at '
+              'alphavantage.co. Leave blank to use the built-in default (if any).',
             ),
             const SizedBox(height: 12),
             TextField(
@@ -488,7 +483,7 @@ class SettingsScreen extends StatelessWidget {
               autocorrect: false,
               enableSuggestions: false,
               decoration: const InputDecoration(
-                labelText: 'API key',
+                labelText: 'Key',
                 hintText: 'Paste key',
               ),
             ),
@@ -528,15 +523,15 @@ class SettingsScreen extends StatelessWidget {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Twelve Data API key'),
+        title: const Text('Twelve Data key'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Optional. Stored only on this device. Daily history when '
-              'Alpha Vantage is blocked. Free key at twelvedata.com. Leave '
-              'blank to use the website default (if any).',
+              'Optional. Stored only on this device — never synced or exported. '
+              'Backup source for daily price history. Get a free key at '
+              'twelvedata.com. Leave blank to use the built-in default (if any).',
             ),
             const SizedBox(height: 12),
             TextField(
@@ -545,7 +540,7 @@ class SettingsScreen extends StatelessWidget {
               autocorrect: false,
               enableSuggestions: false,
               decoration: const InputDecoration(
-                labelText: 'API key',
+                labelText: 'Key',
                 hintText: 'Paste key',
               ),
             ),

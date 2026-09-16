@@ -368,7 +368,7 @@ void main() {
     expect(dayText.style?.color, ZenthoColors.coral);
   });
 
-  testWidgets('portfolio card says mixed sources when Yahoo and Finnhub both quote',
+  testWidgets('portfolio card never names quote vendors, even with mixed sources',
       (tester) async {
     final repo = MemoryStoreRepo();
     await repo.seedHoldings(withHistory: false);
@@ -395,7 +395,11 @@ void main() {
     };
     repo.notifyListeners();
     await pumpInvestments(tester, repo);
-    expect(find.textContaining('mixed sources'), findsOneWidget);
+    expect(find.textContaining('Last price'), findsOneWidget);
+    expect(find.textContaining('mixed sources'), findsNothing);
+    expect(find.textContaining('Finnhub'), findsNothing);
+    expect(find.textContaining('Yahoo Finance'), findsNothing);
+    expect(find.textContaining('CORS'), findsNothing);
   });
 
   test('performance empty copy does not say offline when a last price exists',

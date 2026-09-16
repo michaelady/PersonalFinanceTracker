@@ -621,28 +621,39 @@ void main() {
     expect(seen, contains('candle:VTI'));
   });
 
-  test('QuoteUnavailable copy names CORS and exchange 403 without Yahoo URLs',
+  test('QuoteUnavailable copy names the exchange without vendors or HTTP codes',
       () {
+    final devJargon = [
+      'Yahoo',
+      'Finnhub',
+      'CORS',
+      '403',
+      'HTTP',
+      'query1.finance.yahoo.com',
+    ];
+
     final tsx = QuoteUnavailable(
       symbol: 'AAPL.TO',
       skippedYahoo: true,
       finnhubError: StateError('Finnhub quote HTTP 403 for AAPL.TO'),
     );
-    expect(tsx.toString(), contains('Browser CORS blocks Yahoo'));
-    expect(tsx.toString(), contains('Finnhub 403 for AAPL.TO'));
+    expect(tsx.toString(), contains('AAPL.TO'));
     expect(tsx.toString(), contains('TSX'));
-    expect(tsx.toString(), isNot(contains('query1.finance.yahoo.com')));
-    expect(tsx.toString(), isNot(contains('Yahoo is blocked')));
+    expect(tsx.toString(), contains('free market-data plan'));
+    for (final word in devJargon) {
+      expect(tsx.toString(), isNot(contains(word)), reason: word);
+    }
 
     final swiss = QuoteUnavailable(
       symbol: 'NESN.SW',
       skippedYahoo: true,
       finnhubError: StateError('Finnhub quote HTTP 403 for NESN.SW'),
     );
-    expect(swiss.toString(), contains('Browser CORS blocks Yahoo'));
-    expect(swiss.toString(), contains('Finnhub 403 for NESN.SW'));
+    expect(swiss.toString(), contains('NESN.SW'));
     expect(swiss.toString(), contains('SIX Swiss'));
-    expect(swiss.toString(), isNot(contains('query1.finance.yahoo.com')));
+    for (final word in devJargon) {
+      expect(swiss.toString(), isNot(contains(word)), reason: word);
+    }
     expect(QuoteUnavailable.isSwissListing('NESN.SW'), isTrue);
     expect(QuoteUnavailable.finnhubPackageLabel('NESN.SW'), 'SIX Swiss');
 
@@ -654,10 +665,15 @@ void main() {
         '(StateError: Finnhub quote HTTP 403 for NESN.SW)',
       ),
     );
-    expect(dumped, contains('Browser CORS blocks Yahoo'));
     expect(dumped, contains('non-US'));
-    expect(dumped, isNot(contains('query1.finance.yahoo.com')));
-    expect(dumped, isNot(contains('Yahoo is blocked')));
+    for (final word in devJargon) {
+      expect(dumped, isNot(contains(word)), reason: word);
+    }
+
+    final generic = QuoteUnavailable.shortMessage(
+      StateError('Yahoo chart HTTP 500 for VTI'),
+    );
+    expect(generic, 'Live quotes are not available right now.');
   });
 
   test('web Finnhub 403 without daily fallback throws QuoteUnavailable', () async {

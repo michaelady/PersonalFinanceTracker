@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zentho/data/persistence/local_store.dart';
 import 'package:zentho/domain/models/models.dart';
+import 'package:zentho/domain/services/portfolio_math.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -36,10 +37,46 @@ void main() {
     });
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('zentho_quote_cache_v1'), isNull);
-    expect(prefs.getString('zentho_quote_cache_v2'), isNotNull);
+    expect(prefs.getString('zentho_quote_cache_v3'), isNotNull);
     final loaded = await store.loadQuotes();
     expect(loaded['TSLA']!.previousClose, closeTo(365.44, 0.0001));
     expect(loaded['TSLA']!.source, 'finnhub');
+  });
+
+  test('quote cache v3 migrates v2 last prices and forces a year backfill',
+      () async {
+    final old = CachedQuote(
+      symbol: 'VTI',
+      price: 262.97,
+      currency: 'USD',
+      fetchedAt: DateTime.utc(2026, 9, 16, 12),
+      source: 'finnhub',
+      previousClose: 261.50,
+      history: {
+        '1y': [
+          PricePoint(date: DateTime.utc(2026, 6, 12), close: 240),
+          PricePoint(date: DateTime.utc(2026, 9, 16), close: 262.97),
+        ],
+      },
+      historyFetchedAt: {'1y': DateTime.utc(2026, 9, 16, 12)},
+    );
+    SharedPreferences.setMockInitialValues({
+      'zentho_quote_cache_v2': jsonEncode({'VTI': old.toJson()}),
+    });
+    final store = LocalStore();
+    final loaded = await store.loadQuotes();
+    expect(loaded['VTI']!.price, closeTo(262.97, 0.0001));
+    expect(loaded['VTI']!.history['1y'], hasLength(2));
+    expect(loaded['VTI']!.historyFetchedAt, isEmpty);
+    expect(loaded['VTI']!.fetchedAt.year, 2000);
+    expect(
+      PortfolioMath.historyCoversRange(
+        loaded['VTI'],
+        QuoteHistoryRange.oneYear,
+        now: DateTime.utc(2026, 9, 16),
+      ),
+      isFalse,
+    );
   });
 
   test('snapshot with enum names from a newer app version still loads',

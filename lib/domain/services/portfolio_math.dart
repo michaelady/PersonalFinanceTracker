@@ -670,6 +670,49 @@ abstract final class PortfolioMath {
     ).netWorthMain;
   }
 
+  /// Union two daily series by UTC calendar day. [newer] wins on the same day.
+  static List<PricePoint> mergePricePoints(
+    List<PricePoint> older,
+    List<PricePoint> newer,
+  ) {
+    if (older.isEmpty) return [...newer]..sort((a, b) => a.date.compareTo(b.date));
+    if (newer.isEmpty) return [...older]..sort((a, b) => a.date.compareTo(b.date));
+    final byDay = <DateTime, PricePoint>{};
+    for (final p in older) {
+      byDay[calendarDayUtc(p.date)] = p;
+    }
+    for (final p in newer) {
+      byDay[calendarDayUtc(p.date)] = p;
+    }
+    return byDay.values.toList()..sort((a, b) => a.date.compareTo(b.date));
+  }
+
+  /// Weekly bars fill the year before the first daily close. Daily wins on
+  /// overlap so last price stays the latest session, not a weekly Friday.
+  static List<PricePoint> mergeWeeklyBeforeDaily(
+    List<PricePoint> weekly,
+    List<PricePoint> daily,
+  ) {
+    if (daily.isEmpty) return mergePricePoints(const [], weekly);
+    final start = calendarDayUtc(daily.first.date);
+    final older = [
+      for (final p in weekly)
+        if (calendarDayUtc(p.date).isBefore(start)) p,
+    ];
+    return mergePricePoints(older, daily);
+  }
+
+  static List<PricePoint> _sliceToLookback(
+    List<PricePoint> points,
+    QuoteHistoryRange range,
+    DateTime asOf,
+  ) {
+    if (points.length < 2) return points;
+    final cut = asOf.subtract(range.lookback);
+    final sliced = points.where((p) => !p.date.isBefore(cut)).toList();
+    return sliced.length >= 2 ? sliced : points;
+  }
+
   /// Daily closes stored on the quote, including a longer series sliced down.
   /// Does not invent a previous-close → last-price pair.
   static List<PricePoint> storedHistoryForRange(
@@ -678,28 +721,65 @@ abstract final class PortfolioMath {
     DateTime? now,
   }) {
     if (quote == null) return const [];
-    final points = quote.history[range.key];
-    if (points != null && points.length >= 2) return points;
     final asOf = now ?? DateTime.now().toUtc();
+    final points = quote.history[range.key];
+    if (points != null && points.length >= 2) {
+      return _sliceToLookback(points, range, asOf);
+    }
     // A longer series can fill a shorter window.
     if (range != QuoteHistoryRange.oneYear) {
       final longer = quote.history[QuoteHistoryRange.oneYear.key];
       if (longer != null && longer.isNotEmpty) {
-        final cut = asOf.subtract(range.lookback);
-        final sliced = longer.where((p) => !p.date.isBefore(cut)).toList();
+        final sliced = _sliceToLookback(longer, range, asOf);
         if (sliced.length >= 2) return sliced;
       }
     }
     if (range == QuoteHistoryRange.oneMonth) {
       final q3 = quote.history[QuoteHistoryRange.threeMonths.key];
       if (q3 != null && q3.isNotEmpty) {
-        final cut = asOf.subtract(range.lookback);
-        final sliced = q3.where((p) => !p.date.isBefore(cut)).toList();
+        final sliced = _sliceToLookback(q3, range, asOf);
         if (sliced.length >= 2) return sliced;
       }
     }
     if (points != null && points.isNotEmpty) return points;
     return const [];
+  }
+
+  /// True when local daily bars actually span [range], not just a 1M/3M
+  /// series stored under the `1y` key.
+  static bool historyCoversRange(
+    CachedQuote? quote,
+    QuoteHistoryRange range, {
+    DateTime? now,
+  }) {
+    final stored = storedHistoryForRange(quote, range, now: now);
+    return seriesCoversLookback(stored, range.lookback, now: now);
+  }
+
+  static bool seriesCoversLookback(
+    List<PricePoint> points,
+    Duration lookback, {
+    DateTime? now,
+    Duration grace = const Duration(days: 21),
+  }) {
+    if (points.length < 2) return false;
+    final asOf = now ?? DateTime.now().toUtc();
+    final needBy = asOf.subtract(lookback).add(grace);
+    final first = points.first.date.toUtc();
+    return !first.isAfter(needBy);
+  }
+
+  /// Last stored bar is new enough that we should not re-download history.
+  static bool historyIsCurrent(
+    CachedQuote? quote,
+    QuoteHistoryRange range, {
+    DateTime? now,
+    Duration staleAfter = const Duration(days: 4),
+  }) {
+    final stored = storedHistoryForRange(quote, range, now: now);
+    if (stored.isEmpty) return false;
+    final asOf = now ?? DateTime.now().toUtc();
+    return asOf.difference(stored.last.date.toUtc()) <= staleAfter;
   }
 
   /// Previous regular-session close for day P/L (Yahoo-style last vs

@@ -2,10 +2,9 @@
 
 Sideload installers for testing on a phone. Most modern phones want **`Zentho-arm64.apk`**.
 
-Current build: **1.0.3+11** (versionCode 11), release, debug-signed, from the
-*Build Android APK* run for PR #29 (`8bb2233`). Developer-oriented wording
-(quote vendors, web-vs-app notes, HTTP codes) is gone from the GUI; quote
-problems are now described in plain language.
+Current build: **1.0.4+12** (versionCode 12), release, debug-signed, from the
+*Build Android APK* run for PR #30 (`1c9f62f`). The 1Y investment chart spans
+a year of local history; Day and Lifetime P/L are on each ticker.
 
 ## Install
 

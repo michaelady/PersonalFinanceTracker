@@ -43,6 +43,44 @@ class _MixedBookQuoteClient implements QuoteClient {
   Future<List<TickerSearchResult>> search(String query) async => const [];
 }
 
+class _RecordingQuoteClient implements QuoteClient {
+  final calls = <String>[];
+
+  @override
+  Future<QuoteBundle> fetchChart(
+    String symbol, {
+    QuoteHistoryRange range = QuoteHistoryRange.oneMonth,
+  }) async {
+    final ticker = symbol.trim().toUpperCase();
+    calls.add(ticker);
+    final now = DateTime.now().toUtc();
+    final history = [
+      for (var i = 360; i >= 0; i--)
+        PricePoint(
+          date: now.subtract(Duration(days: i)),
+          close: 200 + (i % 5).toDouble(),
+        ),
+    ];
+    return QuoteBundle(
+      quote: CachedQuote(
+        symbol: ticker,
+        price: history.last.close,
+        currency: 'USD',
+        fetchedAt: now,
+        source: 'test',
+        previousClose: history[history.length - 2].close,
+        history: {QuoteHistoryRange.oneYear.key: history},
+        historyFetchedAt: {QuoteHistoryRange.oneYear.key: now},
+      ),
+      history: history,
+      range: QuoteHistoryRange.oneYear,
+    );
+  }
+
+  @override
+  Future<List<TickerSearchResult>> search(String query) async => const [];
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -130,8 +168,17 @@ void main() {
       ...repo.quotes,
       'VTI': repo.quotes['VTI']!.copyWith(
         fetchedAt: DateTime.now().toUtc(),
+        history: {
+          QuoteHistoryRange.oneYear.key: [
+            for (var i = 360; i >= 0; i--)
+              PricePoint(
+                date: DateTime.now().toUtc().subtract(Duration(days: i)),
+                close: 200,
+              ),
+          ],
+        },
         historyFetchedAt: {
-          QuoteHistoryRange.oneMonth.key: DateTime.now().toUtc(),
+          QuoteHistoryRange.oneYear.key: DateTime.now().toUtc(),
         },
       ),
     };
@@ -145,5 +192,44 @@ void main() {
       repo.quotesError,
       isNot(contains('Could not refresh quotes —')),
     );
+  });
+
+  test('second refresh skips the network when a local year of history exists',
+      () async {
+    final client = _RecordingQuoteClient();
+    SharedPreferences.setMockInitialValues({});
+    final repo = FinanceRepository(
+      refreshRatesOnInit: false,
+      quoteClient: client,
+    );
+    await repo.init();
+    final you = repo.profiles.first;
+    repo.settings = repo.settings.copyWith(onboardingComplete: true);
+    repo.rates = const [CurrencyRate(code: 'USD', rateToMain: 1)];
+    repo.holdings = [
+      InvestmentHolding.create(
+        ticker: 'VTI',
+        displayName: 'Vanguard',
+        shares: 10,
+        averageCostPerShare: 200,
+        currencyCode: 'USD',
+        ownerProfileId: you.id,
+        visibility: VisibilityScope.shared,
+      ),
+    ];
+    await repo.refreshQuotes();
+    expect(client.calls, ['VTI']);
+    expect(
+      PortfolioMath.historyCoversRange(
+        repo.quotes['VTI'],
+        QuoteHistoryRange.oneYear,
+      ),
+      isTrue,
+    );
+
+    await repo.refreshQuotes();
+    expect(client.calls, ['VTI']);
+    await repo.refreshQuotes(force: true);
+    expect(client.calls, ['VTI', 'VTI']);
   });
 }

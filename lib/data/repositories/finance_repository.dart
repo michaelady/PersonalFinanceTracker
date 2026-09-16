@@ -10,7 +10,6 @@ import '../../domain/services/csv_import_service.dart';
 import '../../domain/services/household_invite.dart';
 import '../../domain/services/money_math.dart';
 import '../../domain/services/portfolio_math.dart';
-import '../../domain/services/recurrence_period.dart';
 import '../../domain/services/supported_currencies.dart';
 import '../../domain/services/yahoo_lots_csv.dart';
 import '../auth/auth_service.dart';
@@ -496,93 +495,14 @@ class FinanceRepository extends ChangeNotifier {
         includeInNetWorth: starterAccount.includeInNetWorth,
       ),
     ];
-    await loadDemoExtras(you.id);
+    // A fresh ledger starts empty: no demo transactions, budgets, or goals.
+    transactions = [];
+    budgets = [];
+    goals = [];
+    holdings = [];
+    shareTransactions = [];
     await _persist();
     await refreshRatesOnline();
-  }
-
-  Future<void> loadDemoExtras(String ownerId, {DateTime? now}) async {
-    final checking = accounts.first;
-    final groceries = categories.firstWhere((c) => c.name == 'Groceries');
-    final salary = categories.firstWhere((c) => c.name == 'Salary');
-    final subs = categories.firstWhere((c) => c.name == 'Subscriptions');
-    final asOf = now ?? DateTime.now();
-    final mk = MoneyMath.monthKey(asOf);
-
-    DateTime onOrBeforeToday(int day) {
-      final clamped = day > asOf.day ? asOf.day : day;
-      return DateTime(asOf.year, asOf.month, clamped);
-    }
-
-    transactions = [
-      MoneyTransaction.create(
-        type: TransactionType.income,
-        amount: 4200,
-        currencyCode: settings.mainCurrency,
-        accountId: checking.id,
-        categoryId: salary.id,
-        date: onOrBeforeToday(1),
-        ownerProfileId: ownerId,
-        visibility: VisibilityScope.shared,
-        note: 'Monthly salary',
-        isRecurring: true,
-        recurringLabel: 'Monthly salary',
-        recurrencePeriod: RecurrencePeriod.monthly,
-      ),
-      MoneyTransaction.create(
-        type: TransactionType.expense,
-        amount: 86.4,
-        currencyCode: settings.mainCurrency,
-        accountId: checking.id,
-        categoryId: groceries.id,
-        date: onOrBeforeToday(3),
-        ownerProfileId: ownerId,
-        visibility: VisibilityScope.shared,
-        note: 'Market run',
-      ),
-      MoneyTransaction.create(
-        type: TransactionType.expense,
-        amount: 15.99,
-        currencyCode: settings.mainCurrency,
-        accountId: checking.id,
-        categoryId: subs.id,
-        date: onOrBeforeToday(5),
-        ownerProfileId: ownerId,
-        visibility: VisibilityScope.private,
-        note: 'Streaming',
-        isRecurring: true,
-        recurringLabel: 'Stream+',
-        recurrencePeriod: RecurrencePeriod.monthly,
-      ),
-    ];
-
-    budgets = [
-      BudgetCategory.create(
-        categoryId: groceries.id,
-        monthKey: mk,
-        allocated: 450,
-        visibility: VisibilityScope.shared,
-        ownerProfileId: ownerId,
-      ),
-      BudgetCategory.create(
-        categoryId: subs.id,
-        monthKey: mk,
-        allocated: 80,
-        visibility: VisibilityScope.shared,
-        ownerProfileId: ownerId,
-      ),
-    ];
-
-    goals = [
-      SavingsGoal.create(
-        name: 'Emergency fund',
-        targetAmount: 5000,
-        currentAmount: 1200,
-        currencyCode: settings.mainCurrency,
-        ownerProfileId: ownerId,
-        visibility: VisibilityScope.shared,
-      ),
-    ];
   }
 
   Future<void> setActiveProfile(String profileId) async {

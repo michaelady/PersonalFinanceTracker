@@ -215,7 +215,39 @@ class AccountsScreen extends StatelessWidget {
         );
       }
     } else if (ok == 'delete' && isEditing) {
-      await repo.deleteAccount(existing.id);
+      final txCount = repo.transactionCountForAccount(existing.id);
+      final confirmed = !context.mounted
+          ? false
+          : await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: Text('Delete ${existing.name}?'),
+                  content: Text(
+                    txCount == 0
+                        ? 'This account has no transactions.'
+                        : 'This also deletes $txCount transaction'
+                            '${txCount == 1 ? '' : 's'} booked on it. '
+                            'This cannot be undone.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: ZenthoColors.coral,
+                      ),
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Delete'),
+                    ),
+                  ],
+                ),
+              ) ??
+              false;
+      if (confirmed) {
+        await repo.deleteAccount(existing.id);
+      }
     }
     name.dispose();
     balance.dispose();

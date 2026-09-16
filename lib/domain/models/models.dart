@@ -6,6 +6,17 @@ import '../services/recurrence_period.dart';
 const _uuid = Uuid();
 const Object _copyKeep = Object();
 
+/// Enum lookup that survives values written by a newer app version. Without
+/// this, one unknown name made `FinanceSnapshot.fromJson` throw, the local
+/// store returned `null`, and the app re-onboarded over the saved ledger.
+T _enumOr<T extends Enum>(Iterable<T> values, Object? raw, T fallback) {
+  if (raw is! String) return fallback;
+  for (final value in values) {
+    if (value.name == raw) return value;
+  }
+  return fallback;
+}
+
 enum VisibilityScope { shared, private }
 
 enum AccountType { cash, checking, savings, credit, investment, other }
@@ -174,11 +185,15 @@ class Account extends Equatable {
     return Account(
       id: json['id'] as String,
       name: json['name'] as String,
-      type: AccountType.values.byName(json['type'] as String),
+      type: _enumOr(AccountType.values, json['type'], AccountType.other),
       currencyCode: json['currencyCode'] as String,
       openingBalance: (json['openingBalance'] as num).toDouble(),
       ownerProfileId: json['ownerProfileId'] as String,
-      visibility: VisibilityScope.values.byName(json['visibility'] as String),
+      visibility: _enumOr(
+        VisibilityScope.values,
+        json['visibility'],
+        VisibilityScope.private,
+      ),
       includeInNetWorth: json['includeInNetWorth'] as bool? ?? true,
       archived: json['archived'] as bool? ?? false,
     );
@@ -383,14 +398,22 @@ class MoneyTransaction extends Equatable {
   factory MoneyTransaction.fromJson(Map<String, dynamic> json) {
     return MoneyTransaction(
       id: json['id'] as String,
-      type: TransactionType.values.byName(json['type'] as String),
+      type: _enumOr(
+        TransactionType.values,
+        json['type'],
+        TransactionType.expense,
+      ),
       amount: (json['amount'] as num).toDouble(),
       currencyCode: json['currencyCode'] as String,
       accountId: json['accountId'] as String,
       categoryId: json['categoryId'] as String?,
       date: DateTime.parse(json['date'] as String),
       ownerProfileId: json['ownerProfileId'] as String,
-      visibility: VisibilityScope.values.byName(json['visibility'] as String),
+      visibility: _enumOr(
+        VisibilityScope.values,
+        json['visibility'],
+        VisibilityScope.private,
+      ),
       note: json['note'] as String? ?? '',
       transferAccountId: json['transferAccountId'] as String?,
       exchangeRateToMain: (json['exchangeRateToMain'] as num?)?.toDouble(),
@@ -494,7 +517,11 @@ class BudgetCategory extends Equatable {
       categoryId: json['categoryId'] as String,
       monthKey: json['monthKey'] as String,
       allocated: (json['allocated'] as num).toDouble(),
-      visibility: VisibilityScope.values.byName(json['visibility'] as String),
+      visibility: _enumOr(
+        VisibilityScope.values,
+        json['visibility'],
+        VisibilityScope.private,
+      ),
       ownerProfileId: json['ownerProfileId'] as String,
       rollover: json['rollover'] as bool? ?? true,
     );
@@ -595,8 +622,12 @@ class SavingsGoal extends Equatable {
       currentAmount: (json['currentAmount'] as num).toDouble(),
       currencyCode: json['currencyCode'] as String,
       ownerProfileId: json['ownerProfileId'] as String,
-      visibility: VisibilityScope.values.byName(json['visibility'] as String),
-      status: GoalStatus.values.byName(json['status'] as String),
+      visibility: _enumOr(
+        VisibilityScope.values,
+        json['visibility'],
+        VisibilityScope.private,
+      ),
+      status: _enumOr(GoalStatus.values, json['status'], GoalStatus.active),
       targetDate: json['targetDate'] == null
           ? null
           : DateTime.parse(json['targetDate'] as String),
@@ -722,7 +753,11 @@ class InvestmentHolding extends Equatable {
       averageCostPerShare: (json['averageCostPerShare'] as num).toDouble(),
       currencyCode: json['currencyCode'] as String,
       ownerProfileId: json['ownerProfileId'] as String,
-      visibility: VisibilityScope.values.byName(json['visibility'] as String),
+      visibility: _enumOr(
+        VisibilityScope.values,
+        json['visibility'],
+        VisibilityScope.private,
+      ),
       accountId: json['accountId'] as String?,
       notes: json['notes'] as String? ?? '',
       includeInNetWorth: json['includeInNetWorth'] as bool? ?? true,
@@ -839,7 +874,11 @@ class ShareTransaction extends Equatable {
     return ShareTransaction(
       id: json['id'] as String,
       holdingId: json['holdingId'] as String,
-      type: ShareTransactionType.values.byName(json['type'] as String),
+      type: _enumOr(
+        ShareTransactionType.values,
+        json['type'],
+        ShareTransactionType.fee,
+      ),
       date: DateTime.parse(json['date'] as String),
       shares: (json['shares'] as num?)?.toDouble() ?? 0,
       pricePerShare: (json['pricePerShare'] as num?)?.toDouble() ?? 0,

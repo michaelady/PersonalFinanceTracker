@@ -21,7 +21,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _nameController = TextEditingController(text: 'You');
   final _partnerController = TextEditingController();
   final _accountController = TextEditingController(text: 'Everyday checking');
-  final _balanceController = TextEditingController(text: '2500');
+  final _balanceController = TextEditingController();
   String _currency = 'USD';
   bool _busy = false;
   String? _prefilledFromUid;
@@ -170,6 +170,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
                     labelText: 'Opening balance ($_currency)',
+                    hintText: '0',
                   ),
                 ),
                 const SizedBox(height: 28),

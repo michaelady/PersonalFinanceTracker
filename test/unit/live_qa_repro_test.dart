@@ -7,7 +7,11 @@ import 'package:zentho/domain/services/budget_forecast.dart';
 import 'package:zentho/domain/services/money_math.dart';
 import 'package:zentho/domain/services/recurrence_period.dart';
 
-/// Live web QA repro (fresh onboarding, USD, opening 2500, demo seed).
+/// Live web QA repro (fresh onboarding, USD, opening 2500, plus the ledger
+/// the old demo seed used to create: salary 4200 on the 1st, groceries 86.40
+/// on the 3rd, private Stream+ 15.99 on the 5th, two budgets, one goal).
+/// The app no longer seeds this; the fixture lives here so the math
+/// regressions below stay covered.
 Future<FinanceRepository> qaDemoRepo({
   DateTime? now,
 }) async {
@@ -26,24 +30,182 @@ Future<FinanceRepository> qaDemoRepo({
     const CurrencyRate(code: 'USD', rateToMain: 1),
     const CurrencyRate(code: 'EUR', rateToMain: 1.151393),
   ];
-  repo.accounts = [
-    Account.create(
-      name: 'Checking',
-      type: AccountType.checking,
-      currencyCode: 'USD',
-      ownerProfileId: you.id,
-      visibility: VisibilityScope.shared,
-      openingBalance: 2500,
-    ),
-  ];
-  await repo.loadDemoExtras(you.id, now: now ?? DateTime(2026, 9, 2));
+  final checking = Account.create(
+    name: 'Checking',
+    type: AccountType.checking,
+    currencyCode: 'USD',
+    ownerProfileId: you.id,
+    visibility: VisibilityScope.shared,
+    openingBalance: 2500,
+  );
+  repo.accounts = [checking];
+  seedQaLedger(repo, ownerId: you.id, now: now ?? DateTime(2026, 9, 2));
   repo.loading = false;
   return repo;
+}
+
+void seedQaLedger(
+  FinanceRepository repo, {
+  required String ownerId,
+  required DateTime now,
+}) {
+  final checking = repo.accounts.first;
+  final groceries = repo.categories.firstWhere((c) => c.name == 'Groceries');
+  final salary = repo.categories.firstWhere((c) => c.name == 'Salary');
+  final subs = repo.categories.firstWhere((c) => c.name == 'Subscriptions');
+  final mk = MoneyMath.monthKey(now);
+
+  DateTime onOrBeforeToday(int day) {
+    final clamped = day > now.day ? now.day : day;
+    return DateTime(now.year, now.month, clamped);
+  }
+
+  repo.transactions = [
+    MoneyTransaction.create(
+      type: TransactionType.income,
+      amount: 4200,
+      currencyCode: repo.settings.mainCurrency,
+      accountId: checking.id,
+      categoryId: salary.id,
+      date: onOrBeforeToday(1),
+      ownerProfileId: ownerId,
+      visibility: VisibilityScope.shared,
+      note: 'Monthly salary',
+      isRecurring: true,
+      recurringLabel: 'Monthly salary',
+      recurrencePeriod: RecurrencePeriod.monthly,
+    ),
+    MoneyTransaction.create(
+      type: TransactionType.expense,
+      amount: 86.4,
+      currencyCode: repo.settings.mainCurrency,
+      accountId: checking.id,
+      categoryId: groceries.id,
+      date: onOrBeforeToday(3),
+      ownerProfileId: ownerId,
+      visibility: VisibilityScope.shared,
+      note: 'Market run',
+    ),
+    MoneyTransaction.create(
+      type: TransactionType.expense,
+      amount: 15.99,
+      currencyCode: repo.settings.mainCurrency,
+      accountId: checking.id,
+      categoryId: subs.id,
+      date: onOrBeforeToday(5),
+      ownerProfileId: ownerId,
+      visibility: VisibilityScope.private,
+      note: 'Streaming',
+      isRecurring: true,
+      recurringLabel: 'Stream+',
+      recurrencePeriod: RecurrencePeriod.monthly,
+    ),
+  ];
+
+  repo.budgets = [
+    BudgetCategory.create(
+      categoryId: groceries.id,
+      monthKey: mk,
+      allocated: 450,
+      visibility: VisibilityScope.shared,
+      ownerProfileId: ownerId,
+    ),
+    BudgetCategory.create(
+      categoryId: subs.id,
+      monthKey: mk,
+      allocated: 80,
+      visibility: VisibilityScope.shared,
+      ownerProfileId: ownerId,
+    ),
+  ];
+
+  repo.goals = [
+    SavingsGoal.create(
+      name: 'Emergency fund',
+      targetAmount: 5000,
+      currentAmount: 1200,
+      currencyCode: repo.settings.mainCurrency,
+      ownerProfileId: ownerId,
+      visibility: VisibilityScope.shared,
+    ),
+  ];
 }
 
 void main() {
   // Live QA ran on 2026-09-02; grocery was dated the 3rd and dropped from net worth.
   final asOf = DateTime(2026, 9, 2);
+
+  test('completing onboarding starts with an empty ledger (no demo rows)',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = FinanceRepository(refreshRatesOnInit: false);
+    await repo.init();
+    await repo.completeOnboarding(
+      mainCurrency: 'EUR',
+      primaryName: 'Ana',
+      starterAccount: Account.create(
+        name: 'Main',
+        type: AccountType.checking,
+        currencyCode: 'EUR',
+        ownerProfileId: 'pending',
+        visibility: VisibilityScope.shared,
+        openingBalance: 120,
+      ),
+    );
+    expect(repo.settings.onboardingComplete, isTrue);
+    expect(repo.accounts, hasLength(1));
+    expect(repo.accounts.single.openingBalance, 120);
+    expect(repo.transactions, isEmpty);
+    expect(repo.budgets, isEmpty);
+    expect(repo.goals, isEmpty);
+    expect(repo.holdings, isEmpty);
+    expect(repo.netWorth, closeTo(120, 0.001));
+    expect(repo.availableToSpend(asOf), closeTo(0, 0.001));
+  });
+
+  test('deleting an account removes its transactions and unlinks holdings',
+      () async {
+    final repo = await qaDemoRepo(now: asOf);
+    final checking = repo.accounts.single;
+    final other = Account.create(
+      name: 'Savings',
+      type: AccountType.savings,
+      currencyCode: 'USD',
+      ownerProfileId: repo.settings.activeProfileId,
+      visibility: VisibilityScope.shared,
+      openingBalance: 300,
+    );
+    await repo.addAccount(other);
+    repo.holdings = [
+      InvestmentHolding.create(
+        ticker: 'VTI',
+        displayName: 'VTI',
+        shares: 1,
+        averageCostPerShare: 200,
+        currencyCode: 'USD',
+        ownerProfileId: repo.settings.activeProfileId,
+        visibility: VisibilityScope.shared,
+        accountId: checking.id,
+      ),
+    ];
+    expect(repo.transactionCountForAccount(checking.id), 3);
+
+    await repo.deleteAccount(checking.id);
+
+    expect(repo.accounts.map((a) => a.id), [other.id]);
+    expect(repo.transactions, isEmpty);
+    expect(repo.holdings.single.accountId, isNull);
+    expect(
+      MoneyMath.availableToSpend(
+        transactions: repo.visibleTransactions,
+        budgets: repo.visibleBudgets,
+        monthKeyValue: '2026-09',
+        mainCurrency: 'USD',
+        rates: repo.rates,
+      ),
+      closeTo(0, 0.01),
+    );
+  });
 
   test('demo seed on day 2 includes grocery and subscription in net worth',
       () async {

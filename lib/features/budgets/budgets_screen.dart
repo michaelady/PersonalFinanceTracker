@@ -48,9 +48,10 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           Text('Budgets', style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 4),
           Text(
-            'Tap a budget to edit. Forecasts add every income and subtract '
-            'every expense over the period, each using its own recurrence '
-            '(weekly, monthly, yearly, …).',
+            'Tap a budget to edit. Forecasts add every recurring income and '
+            'subtract every recurring expense over the period, each using its '
+            'own cadence (weekly, monthly, yearly, …), plus budget room and '
+            'typical one-off spending.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 20),
@@ -64,6 +65,11 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
             recurringIncome: forecast.recurringIncomeMonthly,
             plannedExpenses: forecast.plannedExpensesMonthly,
             highSavingsRate: forecast.highSavingsRate,
+            unmarkedIncomeCount: repo.visibleTransactions
+                .where(
+                  (t) => t.type == TransactionType.income && !t.isRecurring,
+                )
+                .length,
           ),
           const SizedBox(height: 20),
           Text(
@@ -328,6 +334,7 @@ class _PredictionCards extends StatelessWidget {
     required this.recurringIncome,
     required this.plannedExpenses,
     required this.highSavingsRate,
+    this.unmarkedIncomeCount = 0,
   });
 
   final String currency;
@@ -339,6 +346,9 @@ class _PredictionCards extends StatelessWidget {
   final double recurringIncome;
   final double plannedExpenses;
   final bool highSavingsRate;
+
+  /// Income rows not flagged recurring; they are invisible to the forecast.
+  final int unmarkedIncomeCount;
 
   @override
   Widget build(BuildContext context) {
@@ -371,6 +381,23 @@ class _PredictionCards extends StatelessWidget {
           label: 'Assumed monthly income',
           child: MoneyText(recurringIncome, currencyCode: currency, signed: true),
         ),
+        if (unmarkedIncomeCount > 0 && recurringIncome == 0) ...[
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              key: const Key('budgets-income-hint'),
+              'Predictions only count income marked as recurring. '
+              '$unmarkedIncomeCount income transaction'
+              '${unmarkedIncomeCount == 1 ? ' is' : 's are'} not: open '
+              '${unmarkedIncomeCount == 1 ? 'it' : 'them'} in Activity and tick '
+              '“Recurring income”, then choose how often it is paid.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: ZenthoColors.coral,
+                  ),
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         _PredictTile(
           label: 'Assumed monthly expenses',

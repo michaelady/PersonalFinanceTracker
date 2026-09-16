@@ -2,6 +2,10 @@
 
 Sideload installers for testing on a phone. Most modern phones want **`Zentho-arm64.apk`**.
 
+Current build: **1.0.1+9** (versionCode 9), release, debug-signed, from the
+*Build Android APK* run for PR #27 (`95ce28c`). New ledgers start empty — no
+demo transactions, budgets, or goals.
+
 ## Install
 
 1. Download the APK onto the phone (this folder on GitHub, or the **zentho-android-apk** artifact from the *Build Android APK* GitHub Action).

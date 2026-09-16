@@ -528,6 +528,107 @@ void main() {
       );
     });
 
+    test('compact 100-day series does not cover 1Y', () {
+      final now = DateTime.utc(2026, 9, 16);
+      final points = [
+        for (var i = 100; i >= 0; i--)
+          PricePoint(
+            date: now.subtract(Duration(days: i)),
+            close: 100 + i.toDouble(),
+          ),
+      ];
+      final q = quote(symbol: 'SMTC', price: 100).copyWith(
+        history: {'1y': points},
+      );
+      expect(
+        PortfolioMath.historyCoversRange(
+          q,
+          QuoteHistoryRange.oneYear,
+          now: now,
+        ),
+        isFalse,
+      );
+      expect(
+        PortfolioMath.historyCoversRange(
+          q,
+          QuoteHistoryRange.threeMonths,
+          now: now,
+        ),
+        isTrue,
+      );
+    });
+
+    test('a year of daily bars covers 1Y and is reused without a download', () {
+      final now = DateTime.utc(2026, 9, 16);
+      final points = [
+        for (var i = 360; i >= 0; i--)
+          PricePoint(
+            date: now.subtract(Duration(days: i)),
+            close: 100 + (i % 7).toDouble(),
+          ),
+      ];
+      final q = quote(symbol: 'SMTC', price: 100).copyWith(
+        fetchedAt: now,
+        history: {'1y': points},
+        historyFetchedAt: {'1y': now},
+      );
+      expect(
+        PortfolioMath.historyCoversRange(
+          q,
+          QuoteHistoryRange.oneYear,
+          now: now,
+        ),
+        isTrue,
+      );
+      expect(
+        PortfolioMath.historyIsCurrent(
+          q,
+          QuoteHistoryRange.oneYear,
+          now: now,
+        ),
+        isTrue,
+      );
+      final year = PortfolioMath.storedHistoryForRange(
+        q,
+        QuoteHistoryRange.oneYear,
+        now: now,
+      );
+      expect(year.first.date.isBefore(now.subtract(const Duration(days: 300))),
+          isTrue);
+      expect(year.last.date, now);
+    });
+
+    test('mergePricePoints unions two series by calendar day', () {
+      final older = [
+        PricePoint(date: DateTime.utc(2025, 10, 1), close: 10),
+        PricePoint(date: DateTime.utc(2026, 8, 1), close: 20),
+      ];
+      final newer = [
+        PricePoint(date: DateTime.utc(2026, 8, 1), close: 21),
+        PricePoint(date: DateTime.utc(2026, 9, 1), close: 22),
+      ];
+      final merged = PortfolioMath.mergePricePoints(older, newer);
+      expect(merged, hasLength(3));
+      expect(merged[0].close, closeTo(10, 0.0001));
+      expect(merged[1].close, closeTo(21, 0.0001));
+      expect(merged[2].close, closeTo(22, 0.0001));
+    });
+
+    test('mergeWeeklyBeforeDaily keeps daily last price', () {
+      final weekly = [
+        PricePoint(date: DateTime.utc(2025, 10, 1), close: 10),
+        PricePoint(date: DateTime.utc(2026, 9, 16), close: 100),
+      ];
+      final daily = [
+        PricePoint(date: DateTime.utc(2026, 9, 15), close: 47.03),
+        PricePoint(date: DateTime.utc(2026, 9, 16), close: 47.10),
+      ];
+      final merged = PortfolioMath.mergeWeeklyBeforeDaily(weekly, daily);
+      expect(merged.first.close, closeTo(10, 0.0001));
+      expect(merged.last.close, closeTo(47.10, 0.0001));
+      expect(merged, isNot(contains(weekly.last)));
+    });
+
     test('1y daily history is sliced to 1M without a new series', () {
       final now = DateTime.utc(2026, 9, 2);
       final q = quote(symbol: 'SMTC', price: 132).copyWith(

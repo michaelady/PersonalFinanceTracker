@@ -357,7 +357,7 @@ void main() {
     expect(day.amount, closeTo(-30, 0.0001));
     expect(day.amount, isNegative);
     expect(day.signed, isTrue);
-    expect(find.textContaining('Day'), findsOneWidget);
+    expect(find.byKey(const Key('portfolio-day-change')), findsOneWidget);
     final dayText = tester.widget<Text>(
       find.descendant(
         of: find.byKey(const Key('portfolio-day-change')),
@@ -400,6 +400,27 @@ void main() {
     expect(find.textContaining('Finnhub'), findsNothing);
     expect(find.textContaining('Yahoo Finance'), findsNothing);
     expect(find.textContaining('CORS'), findsNothing);
+  });
+
+  testWidgets('holding summary shows Day and Lifetime performance',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHoldings(previousClose: 100);
+    await pumpInvestments(tester, repo);
+
+    expect(
+      find.byKey(ValueKey('holding-day-${repo.apple.id}')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey('holding-lifetime-${repo.apple.id}')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Lifetime'), findsWidgets);
+    expect(
+      find.byKey(ValueKey('allocation-perf-${repo.apple.id}')),
+      findsOneWidget,
+    );
   });
 
   test('performance empty copy does not say offline when a last price exists',

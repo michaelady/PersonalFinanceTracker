@@ -8,9 +8,8 @@ import '../../domain/models/models.dart';
 class LocalStore {
   static const _prefsKey = 'zentho_finance_snapshot_v1';
   static const _updatedAtKey = 'zentho_finance_snapshot_updated_at_v1';
-  /// v2 drops pre-session-close caches (Yahoo `chartPreviousClose` as Day
-  /// previous, and Yahoo 1M history merged onto a Finnhub quote).
-  static const _quotesKey = 'zentho_quote_cache_v2';
+  /// v3 stores a real 1Y daily series (v2 compact ~100 bars was labeled `1y`).
+  static const _quotesKey = 'zentho_quote_cache_v3';
   static const _finnhubKey = 'zentho_finnhub_token_v1';
   static const _alphaVantageKey = 'zentho_alphavantage_token_v1';
   static const _twelveDataKey = 'zentho_twelvedata_token_v1';
@@ -54,20 +53,39 @@ class LocalStore {
   Future<Map<String, CachedQuote>> loadQuotes() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      // Ignore v1 (Yahoo chartPreviousClose stored as Day previous).
       await prefs.remove('zentho_quote_cache_v1');
-      final raw = prefs.getString(_quotesKey);
+      var raw = prefs.getString(_quotesKey);
+      var fromLegacy = false;
+      if (raw == null) {
+        raw = prefs.getString('zentho_quote_cache_v2');
+        fromLegacy = raw != null;
+      }
       if (raw == null) return {};
       final json = jsonDecode(raw) as Map<String, dynamic>;
       return {
         for (final e in json.entries)
-          e.key.toUpperCase(): CachedQuote.fromJson(
+          e.key.toUpperCase(): _quoteFromCacheJson(
             e.value as Map<String, dynamic>,
+            fromLegacy: fromLegacy,
           ),
       };
     } catch (_) {
       return {};
     }
+  }
+
+  CachedQuote _quoteFromCacheJson(
+    Map<String, dynamic> json, {
+    required bool fromLegacy,
+  }) {
+    final quote = CachedQuote.fromJson(json);
+    if (!fromLegacy) return quote;
+    // v2 labeled compact ~100-day series as 1y. Keep last price, force a
+    // one-time year backfill on the next refresh.
+    return quote.copyWith(
+      fetchedAt: DateTime.utc(2000),
+      historyFetchedAt: const {},
+    );
   }
 
   Future<void> saveQuotes(Map<String, CachedQuote> quotes) async {

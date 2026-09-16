@@ -165,7 +165,7 @@ void main() {
     expect(seen.url.host, 'query1.finance.yahoo.com');
     expect(seen.url.path, '/v8/finance/chart/AAPL');
     expect(seen.url.queryParameters['interval'], '1d');
-    expect(seen.url.queryParameters['range'], '1mo');
+    expect(seen.url.queryParameters['range'], '1y');
     expect(seen.headers['User-Agent'], contains('Mozilla'));
     expect(bundle.quote.price, closeTo(325.13, 0.0001));
   });
@@ -443,6 +443,12 @@ void main() {
         return http.Response('{"error":"You don\'t have access"}', 403);
       }
       if (request.url.host.contains('alphavantage')) {
+        if (request.url.queryParameters['function'] == 'TIME_SERIES_WEEKLY') {
+          return http.Response(
+            jsonEncode(_alphaVantageWeekly(_yearOfWeeklyCloses(now))),
+            200,
+          );
+        }
         avSeen = request;
         return http.Response(
           jsonEncode(_alphaVantageDaily({
@@ -486,6 +492,12 @@ void main() {
         return http.Response('{"error":"You don\'t have access"}', 403);
       }
       if (request.url.host.contains('alphavantage')) {
+        if (request.url.queryParameters['function'] == 'TIME_SERIES_WEEKLY') {
+          return http.Response(
+            jsonEncode(_alphaVantageWeekly(_yearOfWeeklyCloses(now))),
+            200,
+          );
+        }
         avSeen = request;
         return http.Response(
           jsonEncode(_alphaVantageDaily({
@@ -588,6 +600,12 @@ void main() {
       }
       if (request.url.host.contains('alphavantage')) {
         seen.add('av:${request.url.queryParameters['symbol']}');
+        if (request.url.queryParameters['function'] == 'TIME_SERIES_WEEKLY') {
+          return http.Response(
+            jsonEncode(_alphaVantageWeekly(_yearOfWeeklyCloses(now))),
+            200,
+          );
+        }
         return http.Response(
           jsonEncode(_alphaVantageDaily({
             _ymd(now.subtract(const Duration(days: 3))): '78.40',
@@ -700,7 +718,7 @@ void main() {
     );
   });
 
-  test('mergeFetchedQuote drops Yahoo 1mo history when source flips to Finnhub',
+  test('mergeFetchedQuote keeps local year when source flips to Finnhub',
       () {
     final yahoo = CachedQuote(
       symbol: 'TSLA',
@@ -711,13 +729,14 @@ void main() {
       changePercent: -0.64,
       previousClose: 342.27,
       history: {
-        '1mo': [
+        '1y': [
+          PricePoint(date: DateTime.utc(2025, 9, 14), close: 300),
           PricePoint(date: DateTime.utc(2026, 8, 14), close: 342.27),
           PricePoint(date: DateTime.utc(2026, 9, 11), close: 365.44),
           PricePoint(date: DateTime.utc(2026, 9, 14), close: 363.10),
         ],
       },
-      historyFetchedAt: {'1mo': DateTime.utc(2026, 9, 14, 16)},
+      historyFetchedAt: {'1y': DateTime.utc(2026, 9, 14, 16)},
     );
     final finnhub = CachedQuote(
       symbol: 'TSLA',
@@ -734,8 +753,11 @@ void main() {
     );
     expect(merged.source, 'finnhub');
     expect(merged.previousClose, closeTo(365.44, 0.0001));
-    expect(merged.history, isEmpty);
-    expect(merged.historyFetchedAt, isEmpty);
+    expect(merged.history['1y'], hasLength(4));
+    expect(
+      PortfolioMath.sessionPreviousClose(merged),
+      closeTo(365.44, 0.0001),
+    );
   });
 
   test('mergeFetchedQuote keeps same-source history', () {
@@ -931,10 +953,17 @@ void main() {
       if (request.url.host.contains('alphavantage')) {
         avHits++;
         expect(request.url.path, '/query');
-        expect(request.url.queryParameters['function'], 'TIME_SERIES_DAILY');
+        final fn = request.url.queryParameters['function'];
+        expect(fn, isIn(['TIME_SERIES_DAILY', 'TIME_SERIES_WEEKLY']));
         expect(request.url.queryParameters['symbol'], 'SMTC');
-        expect(request.url.queryParameters['outputsize'], 'compact');
         expect(request.url.queryParameters['apikey'], 'test-av-key');
+        if (fn == 'TIME_SERIES_WEEKLY') {
+          return http.Response(
+            jsonEncode(_alphaVantageWeekly(_yearOfWeeklyCloses(now))),
+            200,
+          );
+        }
+        expect(request.url.queryParameters['outputsize'], 'compact');
         return http.Response(jsonEncode(avBody), 200);
       }
       if (request.url.path.contains('/quote')) {
@@ -957,7 +986,11 @@ void main() {
       yahoo: YahooQuoteClient(client: client),
       finnhub: FinnhubQuoteClient(token: 'free-token', client: client),
       alphaVantage:
-          AlphaVantageHistoryClient(apiKey: 'test-av-key', client: client),
+          AlphaVantageHistoryClient(
+            apiKey: 'test-av-key',
+            client: client,
+            minRequestGap: Duration.zero,
+          ),
     );
     final bundle = await composite.fetchChart('SMTC');
     expect(bundle.quote.source, 'finnhub');
@@ -965,8 +998,15 @@ void main() {
     expect(bundle.history.length, greaterThanOrEqualTo(2));
     expect(bundle.history.last.close, closeTo(132.27, 0.0001));
     expect(bundle.quote.history[QuoteHistoryRange.oneYear.key], isNotEmpty);
-    expect(avHits, 1);
+    expect(avHits, 2);
     expect(candleHits, 1);
+    expect(
+      PortfolioMath.historyCoversRange(
+        bundle.quote,
+        QuoteHistoryRange.oneYear,
+      ),
+      isTrue,
+    );
     expect(
       PortfolioMath.usesLastCloseFallback(
         bundle.quote,
@@ -979,7 +1019,7 @@ void main() {
       'SMTC',
       range: QuoteHistoryRange.oneYear,
     );
-    expect(avHits, 1);
+    expect(avHits, 2);
     expect(yearBundle.history.length, greaterThanOrEqualTo(2));
     expect(candleHits, 1);
   });
@@ -997,7 +1037,11 @@ void main() {
       yahoo: YahooQuoteClient(client: client),
       finnhub: FinnhubQuoteClient(token: 'unused', client: client),
       alphaVantage:
-          AlphaVantageHistoryClient(apiKey: 'test-av-key', client: client),
+          AlphaVantageHistoryClient(
+            apiKey: 'test-av-key',
+            client: client,
+            minRequestGap: Duration.zero,
+          ),
     );
     final bundle = await composite.fetchChart('AAPL');
     expect(bundle.quote.source, 'yahoo');
@@ -1275,7 +1319,7 @@ void main() {
     );
   });
 
-  test('Twelve Data history URL uses interval=1day and outputsize=100',
+  test('Twelve Data history URL uses interval=1day and outputsize=365',
       () async {
     late http.Request seen;
     final client = MockClient((request) async {
@@ -1297,7 +1341,7 @@ void main() {
     expect(seen.url.path, '/time_series');
     expect(seen.url.queryParameters['symbol'], 'AAPL');
     expect(seen.url.queryParameters['interval'], '1day');
-    expect(seen.url.queryParameters['outputsize'], '100');
+    expect(seen.url.queryParameters['outputsize'], '365');
     expect(seen.url.queryParameters['apikey'], 'test-td-key');
     expect(
       TwelveDataHistoryClient.defaultMinRequestGap,
@@ -1372,7 +1416,7 @@ void main() {
         tdHits++;
         expect(request.url.path, '/time_series');
         expect(request.url.queryParameters['interval'], '1day');
-        expect(request.url.queryParameters['outputsize'], '100');
+        expect(request.url.queryParameters['outputsize'], '365');
         expect(request.url.queryParameters['symbol'], 'SMTC');
         expect(request.url.queryParameters['apikey'], 'test-td-key');
         return http.Response(jsonEncode(tdBody), 200);
@@ -1456,25 +1500,22 @@ void main() {
     expect(tdHits, 0);
   });
 
-  test('Alpha Vantage success does not call Twelve Data', () async {
+  test('Twelve Data year of history does not call Alpha Vantage', () async {
     final now = DateTime.now().toUtc();
-    var tdHits = 0;
+    var avHits = 0;
     final client = MockClient((request) async {
       if (request.url.host.contains('yahoo')) {
         throw http.ClientException('Failed to fetch', request.url);
       }
       if (request.url.host.contains('alphavantage')) {
-        return http.Response(
-          jsonEncode(_alphaVantageDaily({
-            _ymd(now.subtract(const Duration(days: 10))): '120.00',
-            _ymd(now): '132.27',
-          })),
-          200,
-        );
+        avHits++;
+        return http.Response('nope', 500);
       }
       if (request.url.host.contains('twelvedata')) {
-        tdHits++;
-        return http.Response('nope', 500);
+        return http.Response(
+          jsonEncode(_twelveDataDaily('SMTC', _yearOfDailyCloses(now))),
+          200,
+        );
       }
       if (request.url.path.contains('/quote')) {
         return http.Response(
@@ -1505,8 +1546,18 @@ void main() {
       ),
     );
     final bundle = await composite.fetchChart('SMTC');
-    expect(bundle.history.length, greaterThanOrEqualTo(2));
-    expect(tdHits, 0);
+    expect(
+      bundle.quote.history[QuoteHistoryRange.oneYear.key]!.length,
+      greaterThan(200),
+    );
+    expect(avHits, 0);
+    expect(
+      PortfolioMath.historyCoversRange(
+        bundle.quote,
+        QuoteHistoryRange.oneYear,
+      ),
+      isTrue,
+    );
   });
 
   test('Twelve Data spaces history fetches for different tickers', () async {
@@ -1590,6 +1641,33 @@ Map<String, dynamic> _alphaVantageDaily(Map<String, String> closesByDate) {
       for (final e in closesByDate.entries) e.key: {'4. close': e.value},
     },
   };
+}
+
+Map<String, dynamic> _alphaVantageWeekly(Map<String, String> closesByDate) {
+  return {
+    'Meta Data': {'2. Symbol': 'SMTC'},
+    'Weekly Time Series': {
+      for (final e in closesByDate.entries) e.key: {'4. close': e.value},
+    },
+  };
+}
+
+Map<String, String> _yearOfWeeklyCloses(DateTime now, {double start = 100}) {
+  final out = <String, String>{};
+  for (var i = 0; i < 52; i++) {
+    out[_ymd(now.subtract(Duration(days: i * 7)))] =
+        (start + i).toStringAsFixed(2);
+  }
+  return out;
+}
+
+Map<String, String> _yearOfDailyCloses(DateTime now, {double start = 100}) {
+  final out = <String, String>{};
+  for (var i = 0; i < 380; i++) {
+    out[_ymd(now.subtract(Duration(days: i)))] =
+        (start + (i % 10)).toStringAsFixed(2);
+  }
+  return out;
 }
 
 Map<String, dynamic> _twelveDataDaily(

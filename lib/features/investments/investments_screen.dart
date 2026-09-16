@@ -584,6 +584,7 @@ class _ChartBlock extends StatelessWidget {
           _PerformanceChart(
             series: series,
             currency: currency,
+            range: range,
             fallbackCaption: twoPointFallback
                 ? performanceTwoPointCaption(range)
                 : null,
@@ -597,11 +598,13 @@ class _PerformanceChart extends StatelessWidget {
   const _PerformanceChart({
     required this.series,
     required this.currency,
+    required this.range,
     this.fallbackCaption,
   });
 
   final List<PricePoint> series;
   final String currency;
+  final QuoteHistoryRange range;
   final String? fallbackCaption;
 
   @override
@@ -615,6 +618,11 @@ class _PerformanceChart extends StatelessWidget {
     final pad = span < 1 ? 1.0 : span * 0.08;
     final dateFormat = DateFormat.MMMd();
     final moneyFormat = NumberFormat.currency(name: currency, symbol: '');
+    final end = last.date.toUtc();
+    final start = end.subtract(range.lookback);
+    final minX = start.millisecondsSinceEpoch.toDouble();
+    final maxX = end.millisecondsSinceEpoch.toDouble();
+    final labelStep = range.lookback.inMilliseconds / 3;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -647,8 +655,11 @@ class _PerformanceChart extends StatelessWidget {
           ),
           child: LineChart(
             LineChartData(
+              minX: minX,
+              maxX: maxX,
               minY: minClose - pad,
               maxY: maxClose + pad,
+              clipData: const FlClipData.all(),
               gridData: FlGridData(
                 show: true,
                 drawVerticalLine: false,
@@ -679,17 +690,16 @@ class _PerformanceChart extends StatelessWidget {
                   sideTitles: SideTitles(
                     showTitles: true,
                     reservedSize: 28,
-                    interval:
-                        (series.length / 3).clamp(1, series.length).toDouble(),
+                    interval: labelStep,
                     getTitlesWidget: (value, meta) {
-                      final i = value.round();
-                      if (i < 0 || i >= series.length) {
-                        return const SizedBox.shrink();
-                      }
+                      final date = DateTime.fromMillisecondsSinceEpoch(
+                        value.round(),
+                        isUtc: true,
+                      );
                       return Padding(
                         padding: const EdgeInsets.only(top: 6),
                         child: Text(
-                          dateFormat.format(series[i].date.toLocal()),
+                          dateFormat.format(date.toLocal()),
                           style: Theme.of(context).textTheme.labelSmall,
                         ),
                       );
@@ -702,23 +712,25 @@ class _PerformanceChart extends StatelessWidget {
                 touchTooltipData: LineTouchTooltipData(
                   getTooltipItems: (spots) => [
                     for (final s in spots)
-                      if (s.spotIndex >= 0 && s.spotIndex < series.length)
-                        LineTooltipItem(
-                          '$currency ${moneyFormat.format(s.y).trim()}\n'
-                          '${dateFormat.format(series[s.spotIndex].date.toLocal())}',
-                          const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
+                      LineTooltipItem(
+                        '$currency ${moneyFormat.format(s.y).trim()}\n'
+                        '${dateFormat.format(DateTime.fromMillisecondsSinceEpoch(s.x.round(), isUtc: true).toLocal())}',
+                        const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
                         ),
+                      ),
                   ],
                 ),
               ),
               lineBarsData: [
                 LineChartBarData(
                   spots: [
-                    for (var i = 0; i < series.length; i++)
-                      FlSpot(i.toDouble(), series[i].close),
+                    for (final p in series)
+                      FlSpot(
+                        p.date.toUtc().millisecondsSinceEpoch.toDouble(),
+                        p.close,
+                      ),
                   ],
                   isCurved: true,
                   preventCurveOverShooting: true,
@@ -796,6 +808,17 @@ class _AllocationRow extends StatelessWidget {
                 ),
               ],
             ),
+            if (valuation.dayChangeMain != null ||
+                valuation.totalPlMain != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                _holdingPerfSummary(valuation, currency),
+                key: ValueKey('allocation-perf-${valuation.holding.id}'),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: ZenthoColors.inkMuted,
+                    ),
+              ),
+            ],
             const SizedBox(height: 6),
             ClipRRect(
               borderRadius: BorderRadius.circular(999),
@@ -893,28 +916,21 @@ class _HoldingTile extends StatelessWidget {
                   valuation.valueForNetWorthMain,
                   currencyCode: currency,
                 ),
-                if (valuation.unrealizedPlMain != null)
-                  MoneyText(
-                    valuation.unrealizedPlMain!,
-                    currencyCode: currency,
-                    signed: true,
-                    style: Theme.of(context).textTheme.bodySmall,
+                if (valuation.dayChangeMain != null)
+                  _PerfLine(
+                    key: ValueKey('holding-day-${h.id}'),
+                    label: 'Day',
+                    amount: valuation.dayChangeMain!,
+                    percent: valuation.dayChangePercent,
+                    currency: currency,
                   ),
-                if (valuation.realizedPlMain != 0 || valuation.dividendMain != 0)
-                  Text(
-                    'Realized ${_signedShort(valuation.realizedPlMain + valuation.dividendMain, currency)}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: ZenthoColors.inkMuted,
-                        ),
-                  ),
-                if (valuation.unrealizedPlPercent != null)
-                  Text(
-                    '${valuation.unrealizedPlPercent!.toStringAsFixed(1)}%',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: (valuation.unrealizedPlMain ?? 0) < 0
-                              ? ZenthoColors.coral
-                              : ZenthoColors.tealDeep,
-                        ),
+                if (valuation.totalPlMain != null)
+                  _PerfLine(
+                    key: ValueKey('holding-lifetime-${h.id}'),
+                    label: 'Lifetime',
+                    amount: valuation.totalPlMain!,
+                    percent: valuation.totalPlPercent,
+                    currency: currency,
                   ),
               ],
             ),
@@ -942,6 +958,48 @@ class _HoldingTile extends StatelessWidget {
 String _sharesLabel(double shares) {
   if (shares == shares.roundToDouble()) return shares.toStringAsFixed(0);
   return shares.toStringAsFixed(4);
+}
+
+String _holdingPerfSummary(HoldingValuation valuation, String currency) {
+  final parts = <String>[];
+  if (valuation.dayChangeMain != null) {
+    final pct = valuation.dayChangePercent == null
+        ? ''
+        : ' ${valuation.dayChangePercent!.toStringAsFixed(1)}%';
+    parts.add('Day ${_signedShort(valuation.dayChangeMain!, currency)}$pct');
+  }
+  if (valuation.totalPlMain != null) {
+    final pct = valuation.totalPlPercent == null
+        ? ''
+        : ' ${valuation.totalPlPercent!.toStringAsFixed(1)}%';
+    parts.add('Lifetime ${_signedShort(valuation.totalPlMain!, currency)}$pct');
+  }
+  return parts.join(' · ');
+}
+
+class _PerfLine extends StatelessWidget {
+  const _PerfLine({
+    super.key,
+    required this.label,
+    required this.amount,
+    required this.currency,
+    this.percent,
+  });
+
+  final String label;
+  final double amount;
+  final double? percent;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = amount < 0 ? ZenthoColors.coral : ZenthoColors.tealDeep;
+    final pct = percent == null ? '' : ' ${percent!.toStringAsFixed(1)}%';
+    return Text(
+      '$label ${_signedShort(amount, currency)}$pct',
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: color),
+    );
+  }
 }
 
 String _signedShort(double amount, String currency) {

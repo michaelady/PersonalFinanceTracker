@@ -1239,25 +1239,18 @@ class FinanceRepository extends ChangeNotifier {
       for (var i = 0; i < tickers.length; i++) {
         final ticker = tickers[i];
         final cached = quotes[ticker];
-        final quoteFresh =
-            cached != null && PortfolioMath.quoteIsFresh(cached.fetchedAt);
-        final stalePrev = cached != null &&
-            PortfolioMath.previousCloseLooksLikeRangeStart(
-              cached,
-              cached.previousClose,
-            );
-        if (!force &&
-            cached != null &&
-            quoteFresh &&
-            _historyCacheFresh(cached, range) &&
-            !stalePrev) {
+        if (!force && cached != null && _localHistoryReusable(cached)) {
           lastSource = cached.source;
           keptFresh++;
           continue;
         }
         try {
-          final bundle =
-              await _quoteClient.fetchChart(ticker, range: range);
+          final bundle = await _quoteClient.fetchChart(
+            ticker,
+            range: range.lookback >= QuoteHistoryRange.oneYear.lookback
+                ? range
+                : QuoteHistoryRange.oneYear,
+          );
           quotes = {
             ...quotes,
             ticker: mergeFetchedQuote(cached, bundle),
@@ -1307,19 +1300,26 @@ class FinanceRepository extends ChangeNotifier {
     }
   }
 
-  /// Skip a network fetch when this range (or a longer cached series) is fresh.
-  /// Empty history with a fresh timestamp means we already tried (e.g. Finnhub
-  /// 403 + Alpha Vantage daily-quota miss + Twelve Data miss) and should not
-  /// burn the 25/day or 8/min limits. Per-minute Alpha Vantage throttles are
-  /// not stamped, so they can retry.
-  bool _historyCacheFresh(CachedQuote cached, QuoteHistoryRange range) {
-    final stored = PortfolioMath.storedHistoryForRange(cached, range);
-    if (stored.length >= 2) {
-      final at = PortfolioMath.historyFetchedAtForRange(cached, range);
-      return at != null && PortfolioMath.quoteIsFresh(at);
+  /// Skip a network fetch when a year of daily bars is already on this
+  /// device and the last bar is recent. Pull-to-refresh still refetches.
+  bool _localHistoryReusable(CachedQuote cached) {
+    if (PortfolioMath.previousCloseLooksLikeRangeStart(
+      cached,
+      cached.previousClose,
+    )) {
+      return false;
     }
-    final attempted = cached.historyFetchedAt[range.key];
-    return attempted != null && PortfolioMath.quoteIsFresh(attempted);
+    if (!PortfolioMath.historyCoversRange(
+      cached,
+      QuoteHistoryRange.oneYear,
+    )) {
+      final attempted =
+          cached.historyFetchedAt[QuoteHistoryRange.oneYear.key];
+      if (attempted == null) return false;
+      return DateTime.now().toUtc().difference(attempted.toUtc()) <
+          const Duration(hours: 12);
+    }
+    return PortfolioMath.historyIsCurrent(cached, QuoteHistoryRange.oneYear);
   }
 
   CsvFullExportResult exportFullCsv({DateTime? exportedAt}) {

@@ -70,7 +70,11 @@ class YahooQuoteClient implements QuoteClient {
     final uri = Uri.https(
       'query1.finance.yahoo.com',
       '/v8/finance/chart/$ticker',
-      {'interval': '1d', 'range': range.key},
+      {
+        'interval': '1d',
+        // Always pull a year so 1M/3M/1Y are sliced from local history.
+        'range': QuoteHistoryRange.oneYear.key,
+      },
     );
     final response = await _client
         .get(uri, headers: _headers)
@@ -79,7 +83,17 @@ class YahooQuoteClient implements QuoteClient {
       throw StateError('Yahoo chart HTTP ${response.statusCode} for $ticker');
     }
     final json = jsonDecode(response.body) as Map<String, dynamic>;
-    return parseChart(json, ticker: ticker, range: range);
+    final parsed = parseChart(
+      json,
+      ticker: ticker,
+      range: QuoteHistoryRange.oneYear,
+    );
+    final sliced = PortfolioMath.storedHistoryForRange(parsed.quote, range);
+    return QuoteBundle(
+      quote: parsed.quote,
+      history: sliced.length >= 2 ? sliced : parsed.history,
+      range: range,
+    );
   }
 
   @override
@@ -404,7 +418,8 @@ class AlphaVantageHistoryClient {
   DateTime? _dailyQuotaAt;
 
   /// One compact daily series per ticker (~100 trading days). Reused across
-  /// 1M/3M/1Y — 1Y plots whatever compact returned, not a claimed 370-day pull.
+  /// 1M/3M. For 1Y, [fetchWeeklyHistory] is merged in so the year is covered
+  /// on a free key (compact daily is only ~5 months).
   Future<List<PricePoint>> fetchDailyHistory(String symbol) {
     final ticker = symbol.trim().toUpperCase();
     final cached = _cache[ticker];
@@ -441,13 +456,58 @@ class AlphaVantageHistoryClient {
       }
       throw StateError('Alpha Vantage: $text');
     }
-    // Compact (~100 sessions) is enough to slice 1M/3M; keep the whole series
-    // for 1Y rather than trimming as if we downloaded 370 calendar days.
+    // Compact (~100 sessions) is enough to slice 1M/3M. Keep every bar so a
+    // later weekly merge can fill the rest of the year.
     final points = parseDailySeries(json);
     if (points.length < 2) {
       throw StateError('Alpha Vantage returned no daily history for $ticker');
     }
     _cache[ticker] = _CachedDaily(DateTime.now().toUtc(), points);
+    return points;
+  }
+
+  /// Compact weekly closes (~100 weeks). Combined with daily compact this
+  /// covers a 1Y chart without `outputsize=full`.
+  Future<List<PricePoint>> fetchWeeklyHistory(String symbol) {
+    final ticker = 'W:${symbol.trim().toUpperCase()}';
+    final cached = _cache[ticker];
+    if (cached != null && PortfolioMath.quoteIsFresh(cached.at)) {
+      return Future.value(cached.points);
+    }
+    final pending = _inflight[ticker];
+    if (pending != null) return pending;
+    final future = _downloadWeeklyHistory(symbol.trim().toUpperCase());
+    _inflight[ticker] = future;
+    return future.whenComplete(() => _inflight.remove(ticker));
+  }
+
+  Future<List<PricePoint>> _downloadWeeklyHistory(String ticker) async {
+    _throwIfDailyQuotaBlocked();
+    await _awaitRequestGap();
+    _throwIfDailyQuotaBlocked();
+    final uri = Uri.https('www.alphavantage.co', '/query', {
+      'function': 'TIME_SERIES_WEEKLY',
+      'symbol': ticker,
+      'apikey': apiKey,
+    });
+    final res = await _client.get(uri).timeout(const Duration(seconds: 15));
+    if (res.statusCode != 200) {
+      throw StateError('Alpha Vantage HTTP ${res.statusCode} for $ticker');
+    }
+    final json = jsonDecode(res.body) as Map<String, dynamic>;
+    final blocked = json['Note'] ?? json['Information'] ?? json['Error Message'];
+    if (blocked != null) {
+      final text = blocked.toString();
+      if (classifyThrottle(text) == AlphaVantageThrottle.dailyQuota) {
+        _dailyQuotaAt = DateTime.now().toUtc();
+      }
+      throw StateError('Alpha Vantage: $text');
+    }
+    final points = parseWeeklySeries(json);
+    if (points.length < 2) {
+      throw StateError('Alpha Vantage returned no weekly history for $ticker');
+    }
+    _cache['W:$ticker'] = _CachedDaily(DateTime.now().toUtc(), points);
     return points;
   }
 
@@ -525,6 +585,30 @@ class AlphaVantageHistoryClient {
     return out.where((p) => !p.date.isBefore(cut)).toList();
   }
 
+  static List<PricePoint> parseWeeklySeries(
+    Map<String, dynamic> json, {
+    Duration? keep,
+    DateTime? now,
+  }) {
+    final blocked = json['Note'] ?? json['Information'] ?? json['Error Message'];
+    if (blocked != null) {
+      throw StateError('Alpha Vantage: $blocked');
+    }
+    final series = json['Weekly Time Series'] as Map<String, dynamic>?;
+    if (series == null || series.isEmpty) return const [];
+    final out = <PricePoint>[];
+    for (final entry in series.entries) {
+      final date = _parseUtcDate(entry.key);
+      final close = _parseClose(entry.value);
+      if (date == null || close == null || close <= 0) continue;
+      out.add(PricePoint(date: date, close: close));
+    }
+    out.sort((a, b) => a.date.compareTo(b.date));
+    if (keep == null) return out;
+    final cut = (now ?? DateTime.now()).toUtc().subtract(keep);
+    return out.where((p) => !p.date.isBefore(cut)).toList();
+  }
+
   static DateTime? _parseUtcDate(String raw) {
     final parts = raw.split('-');
     if (parts.length < 3) return null;
@@ -586,11 +670,11 @@ TwelveDataHistoryClient? createTwelveDataHistoryClient({
 }
 
 /// CORS-open daily history (`time_series`, `interval=1day`). Used on web after
-/// Yahoo fails, Finnhub candles are unavailable, and Alpha Vantage returns no
-/// series (`Information` / quota wall). Not used for last price.
+/// Yahoo fails and Finnhub candles are unavailable. Not used for last price
+/// when Finnhub's quote works.
 ///
 /// Free plan is 8 requests/minute. HTTP starts are spaced by 8s. One series
-/// (`outputsize=100`) is cached and sliced for 1M/3M; 1Y plots those points.
+/// (`outputsize=365`) is cached locally and sliced for 1M/3M/1Y.
 class TwelveDataHistoryClient {
   TwelveDataHistoryClient({
     required this.apiKey,
@@ -615,7 +699,10 @@ class TwelveDataHistoryClient {
   DateTime? _lastRequestAt;
   Future<void>? _requestChain;
 
-  /// One daily series per ticker (~100 trading days). Reused across 1M/3M/1Y.
+  /// Trading days in a year, plus a few extra for holidays.
+  static const yearOutputSize = '365';
+
+  /// One daily series per ticker (~1 year). Reused across 1M/3M/1Y.
   Future<List<PricePoint>> fetchDailyHistory(String symbol) {
     final ticker = symbol.trim().toUpperCase();
     final cached = _cache[ticker];
@@ -634,7 +721,7 @@ class TwelveDataHistoryClient {
     final uri = Uri.https('api.twelvedata.com', '/time_series', {
       'symbol': ticker,
       'interval': '1day',
-      'outputsize': '100',
+      'outputsize': yearOutputSize,
       'apikey': apiKey,
     });
     final res = await _client.get(uri).timeout(const Duration(seconds: 15));
@@ -744,25 +831,26 @@ class FinnhubQuoteClient implements QuoteClient {
     }
     final quoteJson = jsonDecode(quoteRes.body) as Map<String, dynamic>;
     final parsed = parseQuote(quoteJson, ticker: ticker);
-    final history = await _fetchCandle(ticker, range);
+    final history = await _fetchCandle(ticker);
     final at = parsed.fetchedAt;
     return QuoteBundle(
       quote: parsed.copyWith(
-        history: {range.key: history},
-        historyFetchedAt: {range.key: at},
+        history: {
+          if (history.length >= 2) QuoteHistoryRange.oneYear.key: history,
+        },
+        historyFetchedAt: {
+          if (history.length >= 2) QuoteHistoryRange.oneYear.key: at,
+        },
       ),
       history: history,
       range: range,
     );
   }
 
-  Future<List<PricePoint>> _fetchCandle(
-    String ticker,
-    QuoteHistoryRange range,
-  ) async {
+  Future<List<PricePoint>> _fetchCandle(String ticker) async {
     if (_candlesUnavailableOnPlan) return const [];
     final to = DateTime.now().toUtc();
-    final from = to.subtract(range.lookback);
+    final from = to.subtract(QuoteHistoryRange.oneYear.lookback);
     final uri = Uri.https('finnhub.io', '/api/v1/stock/candle', {
       'symbol': ticker,
       'resolution': 'D',
@@ -901,14 +989,35 @@ class FinnhubQuoteClient implements QuoteClient {
   }
 }
 
-/// Keep same-source daily history across refetches. Drop the other vendor's
-/// series so Day P/L cannot treat a 1M range-start close as yesterday after
-/// Yahoo ↔ Finnhub fallback.
+/// Keep daily history across refetches. Same-day bars from [bundle] win;
+/// a shorter vendor series must not wipe a longer local year.
 CachedQuote mergeFetchedQuote(CachedQuote? previous, QuoteBundle bundle) {
   final next = bundle.quote;
   if (previous == null) return next;
-  if (previous.source != next.source) return next;
-  final history = {...previous.history, ...next.history};
+  if (previous.source != next.source) {
+    // Keep the longer local year when only the last-price vendor flipped.
+    final mergedHistory = <String, List<PricePoint>>{
+      ...previous.history,
+    };
+    for (final e in next.history.entries) {
+      mergedHistory[e.key] = PortfolioMath.mergePricePoints(
+        mergedHistory[e.key] ?? const [],
+        e.value,
+      );
+    }
+    final fetched = {
+      ...previous.historyFetchedAt,
+      ...next.historyFetchedAt,
+    };
+    return next.copyWith(history: mergedHistory, historyFetchedAt: fetched);
+  }
+  final history = <String, List<PricePoint>>{...previous.history};
+  for (final e in next.history.entries) {
+    history[e.key] = PortfolioMath.mergePricePoints(
+      history[e.key] ?? const [],
+      e.value,
+    );
+  }
   final fetched = {...previous.historyFetchedAt, ...next.historyFetchedAt};
   final range = bundle.range;
   // A per-minute Alpha Vantage miss omits this range's stamp so retries are
@@ -1004,9 +1113,9 @@ class QuoteUnavailable implements Exception {
 }
 
 /// Try Yahoo first (native Android/Windows). On failure, Finnhub quote (and
-/// candles when the plan allows). If candles are missing, Alpha Vantage daily
-/// history is tried, then Twelve Data when AV is missing or throws
-/// `Information`. Never uses a CORS proxy.
+/// 1Y candles when the plan allows). If candles are missing, Twelve Data
+/// daily (365 bars) is tried, then Alpha Vantage compact daily merged with
+/// weekly so a free key can still fill a year. Never uses a CORS proxy.
 class CompositeQuoteClient implements QuoteClient {
   CompositeQuoteClient({
     required this.yahoo,
@@ -1096,56 +1205,110 @@ class CompositeQuoteClient implements QuoteClient {
     throw QuoteUnavailable(symbol: symbol, skippedYahoo: skipYahoo);
   }
 
-  /// Finnhub last price is kept. Empty / 403 candles get Alpha Vantage daily
-  /// closes, then Twelve Data when AV is missing or throws `Information`.
+  /// Finnhub last price is kept. Empty / 403 candles get a year of daily
+  /// closes from Twelve Data, then Alpha Vantage daily (+ weekly when compact
+  /// daily is shorter than 1Y).
   Future<QuoteBundle> _attachDailyHistory(
     QuoteBundle bundle,
     String symbol,
     QuoteHistoryRange range,
   ) async {
-    if (bundle.history.length >= 2) return bundle;
+    if (PortfolioMath.historyCoversRange(
+      bundle.quote,
+      QuoteHistoryRange.oneYear,
+    )) {
+      return _withSlicedDailyHistory(
+        bundle,
+        range,
+        bundle.quote.history[QuoteHistoryRange.oneYear.key] ?? bundle.history,
+      );
+    }
 
     var avPerMinute = false;
-    final av = alphaVantage;
-    if (av != null) {
-      try {
-        return _withSlicedDailyHistory(
-          bundle,
-          range,
-          await av.fetchDailyHistory(AlphaVantageHistoryClient.symbolFor(symbol)),
-        );
-      } catch (error) {
-        if (AlphaVantageHistoryClient.isPerMinuteThrottleError(error)) {
-          avPerMinute = true;
-        }
-      }
-    }
+    List<PricePoint>? best = bundle.history.length >= 2 ? bundle.history : null;
 
     final td = twelveData;
     if (td != null) {
       try {
-        return _withSlicedDailyHistory(
-          bundle,
-          range,
-          await td.fetchDailyHistory(symbol),
-        );
+        final points = await td.fetchDailyHistory(symbol);
+        if (_isLongerSeries(points, best)) best = points;
       } catch (_) {
-        // Twelve Data 401 / status=error / empty series: keep Finnhub quote.
+        // Twelve Data 401 / status=error / empty series: try Alpha Vantage.
       }
     }
 
+    if (!PortfolioMath.seriesCoversLookback(
+      best ?? const [],
+      QuoteHistoryRange.oneYear.lookback,
+    )) {
+      final av = alphaVantage;
+      if (av != null) {
+        try {
+          final daily = await av.fetchDailyHistory(
+            AlphaVantageHistoryClient.symbolFor(symbol),
+          );
+          var merged = daily;
+          if (!PortfolioMath.seriesCoversLookback(
+            daily,
+            QuoteHistoryRange.oneYear.lookback,
+          )) {
+            try {
+              final weekly = await av.fetchWeeklyHistory(
+                AlphaVantageHistoryClient.symbolFor(symbol),
+              );
+              merged = PortfolioMath.mergeWeeklyBeforeDaily(weekly, daily);
+            } catch (error) {
+              if (AlphaVantageHistoryClient.isPerMinuteThrottleError(error)) {
+                avPerMinute = true;
+              }
+            }
+          }
+          if (_isLongerSeries(merged, best)) best = merged;
+        } catch (error) {
+          if (AlphaVantageHistoryClient.isPerMinuteThrottleError(error)) {
+            avPerMinute = true;
+          }
+        }
+      }
+    }
+
+    if (best != null && best.length >= 2) {
+      return _withSlicedDailyHistory(bundle, range, best);
+    }
+
+    final attemptedAt = DateTime.now().toUtc();
     if (avPerMinute) {
       // Do not stamp empty history as a successful miss — retry after the
       // 12s spacing window. Daily-quota errors keep Finnhub's stamp.
       final fetched = Map<String, DateTime>.from(bundle.quote.historyFetchedAt)
-        ..remove(range.key);
+        ..remove(range.key)
+        ..remove(QuoteHistoryRange.oneYear.key);
       return QuoteBundle(
         quote: bundle.quote.copyWith(historyFetchedAt: fetched),
         history: bundle.history,
         range: range,
       );
     }
-    return bundle;
+    return QuoteBundle(
+      quote: bundle.quote.copyWith(
+        historyFetchedAt: {
+          ...bundle.quote.historyFetchedAt,
+          QuoteHistoryRange.oneYear.key: attemptedAt,
+          range.key: attemptedAt,
+        },
+      ),
+      history: bundle.history,
+      range: range,
+    );
+  }
+
+  static bool _isLongerSeries(List<PricePoint> candidate, List<PricePoint>? best) {
+    if (candidate.length < 2) return false;
+    if (best == null || best.length < 2) return true;
+    final candSpan = candidate.last.date.difference(candidate.first.date);
+    final bestSpan = best.last.date.difference(best.first.date);
+    return candSpan > bestSpan ||
+        (candSpan == bestSpan && candidate.length > best.length);
   }
 
   /// Last completed daily close as last price when Finnhub's quote 403s
@@ -1155,32 +1318,68 @@ class CompositeQuoteClient implements QuoteClient {
     QuoteHistoryRange range,
   ) async {
     final ticker = symbol.trim().toUpperCase();
-    final av = alphaVantage;
-    if (av != null) {
-      try {
-        final bundle = _quoteFromDailyCloses(
-          ticker: ticker,
-          range: range,
-          year: await av.fetchDailyHistory(
-            AlphaVantageHistoryClient.symbolFor(ticker),
-          ),
-          source: 'alphavantage',
-        );
-        if (bundle != null) return bundle;
-      } catch (_) {}
+    QuoteBundle? best;
+
+    void consider(QuoteBundle? bundle) {
+      if (bundle == null) return;
+      if (best == null) {
+        best = bundle;
+        return;
+      }
+      final cand =
+          bundle.quote.history[QuoteHistoryRange.oneYear.key] ?? bundle.history;
+      final prev =
+          best!.quote.history[QuoteHistoryRange.oneYear.key] ?? best!.history;
+      if (_isLongerSeries(cand, prev)) best = bundle;
     }
+
     final td = twelveData;
     if (td != null) {
       try {
-        return _quoteFromDailyCloses(
-          ticker: ticker,
-          range: range,
-          year: await td.fetchDailyHistory(ticker),
-          source: 'twelvedata',
+        consider(
+          _quoteFromDailyCloses(
+            ticker: ticker,
+            range: range,
+            year: await td.fetchDailyHistory(ticker),
+            source: 'twelvedata',
+          ),
         );
       } catch (_) {}
     }
-    return null;
+
+    final av = alphaVantage;
+    if (av != null &&
+        !PortfolioMath.historyCoversRange(
+          best?.quote,
+          QuoteHistoryRange.oneYear,
+        )) {
+      try {
+        final daily = await av.fetchDailyHistory(
+          AlphaVantageHistoryClient.symbolFor(ticker),
+        );
+        var year = daily;
+        if (!PortfolioMath.seriesCoversLookback(
+          daily,
+          QuoteHistoryRange.oneYear.lookback,
+        )) {
+          try {
+            final weekly = await av.fetchWeeklyHistory(
+              AlphaVantageHistoryClient.symbolFor(ticker),
+            );
+            year = PortfolioMath.mergeWeeklyBeforeDaily(weekly, daily);
+          } catch (_) {}
+        }
+        consider(
+          _quoteFromDailyCloses(
+            ticker: ticker,
+            range: range,
+            year: year,
+            source: 'alphavantage',
+          ),
+        );
+      } catch (_) {}
+    }
+    return best;
   }
 
   QuoteBundle? _quoteFromDailyCloses({

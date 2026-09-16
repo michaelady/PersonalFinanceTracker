@@ -132,7 +132,7 @@ abstract final class BudgetForecast {
     final series = <ForecastPoint>[
       for (var i = 0; i <= horizon.months; i++)
         ForecastPoint(
-          date: DateTime(asOf.year, asOf.month + i, asOf.day),
+          date: RecurrencePeriod.addMonths(asOf, i),
           balance: current + plan.netOverMonths(i),
         ),
     ];

@@ -550,6 +550,50 @@ void main() {
     });
   });
 
+  test('forecast series clamps month-end dates instead of rolling over', () {
+    final account = Account.create(
+      name: 'Checking',
+      type: AccountType.checking,
+      currencyCode: 'USD',
+      ownerProfileId: 'p1',
+      visibility: VisibilityScope.shared,
+      openingBalance: 100,
+    );
+    final summary = BudgetForecast.project(
+      accounts: [account],
+      transactions: const [],
+      budgets: const [],
+      mainCurrency: 'USD',
+      rates: FxRateService.defaultRatesFor('USD'),
+      horizon: ForecastHorizon.m3,
+      now: DateTime(2026, 1, 31),
+    );
+    final dates = summary.series.map((p) => p.date).toList();
+    expect(dates.first, DateTime(2026, 1, 31));
+    // Jan 31 + 1 month is Feb 28, not Mar 3.
+    expect(dates[1], DateTime(2026, 2, 28));
+    expect(dates[2], DateTime(2026, 3, 31));
+    expect(dates[3], DateTime(2026, 4, 30));
+    for (var i = 1; i < dates.length; i++) {
+      expect(dates[i].isAfter(dates[i - 1]), isTrue);
+    }
+  });
+
+  test('RecurrencePeriod.addMonths clamps to the target month length', () {
+    expect(
+      RecurrencePeriod.addMonths(DateTime(2024, 1, 31), 1),
+      DateTime(2024, 2, 29),
+    );
+    expect(
+      RecurrencePeriod.addMonths(DateTime(2026, 11, 30), 3),
+      DateTime(2027, 2, 28),
+    );
+    expect(
+      RecurrencePeriod.addMonths(DateTime(2026, 5, 15), 0),
+      DateTime(2026, 5, 15),
+    );
+  });
+
   test('RecurrencePeriod defaults to monthly', () {
     expect(RecurrencePeriod.tryParse(null), RecurrencePeriod.monthly);
     expect(RecurrencePeriod.monthly.label, 'Monthly');

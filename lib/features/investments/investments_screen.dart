@@ -1209,7 +1209,9 @@ class _HoldingEditorState extends State<_HoldingEditor> {
               const SizedBox(height: 12),
               DropdownButtonFormField<String?>(
                 // ignore: deprecated_member_use
-                value: _accountId,
+                value: repo.visibleAccounts.any((a) => a.id == _accountId)
+                    ? _accountId
+                    : null,
                 decoration: const InputDecoration(
                   labelText: 'Account (optional)',
                 ),

@@ -871,8 +871,23 @@ class FinanceRepository extends ChangeNotifier {
     await _persist();
   }
 
+  /// Transactions booked on [id] (or transferring into it).
+  int transactionCountForAccount(String id) =>
+      transactions.where((t) => t.accountId == id || t.transferAccountId == id)
+          .length;
+
+  /// Removes the account together with its transactions so Home / Reports
+  /// stop counting money that no longer belongs to any account. Holdings
+  /// linked to it are kept and simply unlinked.
   Future<void> deleteAccount(String id) async {
     accounts = accounts.where((a) => a.id != id).toList();
+    transactions = transactions
+        .where((t) => t.accountId != id && t.transferAccountId != id)
+        .toList();
+    holdings = [
+      for (final h in holdings)
+        if (h.accountId == id) h.copyWith(accountId: null) else h,
+    ];
     await _persist();
   }
 

@@ -163,6 +163,50 @@ void main() {
     expect(repo.availableToSpend(asOf), closeTo(0, 0.001));
   });
 
+  test('deleting an account removes its transactions and unlinks holdings',
+      () async {
+    final repo = await qaDemoRepo(now: asOf);
+    final checking = repo.accounts.single;
+    final other = Account.create(
+      name: 'Savings',
+      type: AccountType.savings,
+      currencyCode: 'USD',
+      ownerProfileId: repo.settings.activeProfileId,
+      visibility: VisibilityScope.shared,
+      openingBalance: 300,
+    );
+    await repo.addAccount(other);
+    repo.holdings = [
+      InvestmentHolding.create(
+        ticker: 'VTI',
+        displayName: 'VTI',
+        shares: 1,
+        averageCostPerShare: 200,
+        currencyCode: 'USD',
+        ownerProfileId: repo.settings.activeProfileId,
+        visibility: VisibilityScope.shared,
+        accountId: checking.id,
+      ),
+    ];
+    expect(repo.transactionCountForAccount(checking.id), 3);
+
+    await repo.deleteAccount(checking.id);
+
+    expect(repo.accounts.map((a) => a.id), [other.id]);
+    expect(repo.transactions, isEmpty);
+    expect(repo.holdings.single.accountId, isNull);
+    expect(
+      MoneyMath.availableToSpend(
+        transactions: repo.visibleTransactions,
+        budgets: repo.visibleBudgets,
+        monthKeyValue: '2026-09',
+        mainCurrency: 'USD',
+        rates: repo.rates,
+      ),
+      closeTo(0, 0.01),
+    );
+  });
+
   test('demo seed on day 2 includes grocery and subscription in net worth',
       () async {
     final repo = await qaDemoRepo(now: asOf);

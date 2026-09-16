@@ -35,7 +35,9 @@ class DashboardScreen extends StatelessWidget {
       rates: repo.rates,
       includeExpectedRecurring: true,
     );
-    final recurring = MoneyMath.recurringCandidates(repo.visibleTransactions);
+    // One series per recurring item (salary, rent…), not every booked row.
+    final recurring =
+        MoneyMath.latestRecurringTemplates(repo.visibleTransactions);
     final recent = repo.visibleTransactions.take(5).toList();
 
     return AppScaffoldBody(

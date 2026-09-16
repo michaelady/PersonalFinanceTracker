@@ -124,8 +124,11 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
             )
           else
             ...budgets.map((budget) {
+              // Category may be gone after a CSV replace or sync from another
+              // device; never let one orphaned budget take down the tab.
               final category = repo.categories
-                  .firstWhere((c) => c.id == budget.categoryId);
+                  .where((c) => c.id == budget.categoryId)
+                  .firstOrNull;
               final spent = MoneyMath.spentInCategoryMain(
                 categoryId: budget.categoryId,
                 monthKeyValue: month,
@@ -153,7 +156,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                         children: [
                           Expanded(
                             child: Text(
-                              category.name,
+                              category?.name ?? 'Unknown category',
                               style: Theme.of(context).textTheme.titleMedium,
                             ),
                           ),
@@ -208,7 +211,9 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   }) async {
     if (categories.isEmpty) return;
     final isEditing = existing != null;
-    var categoryId = existing?.categoryId ?? categories.first.id;
+    var categoryId = categories.any((c) => c.id == existing?.categoryId)
+        ? existing!.categoryId
+        : categories.first.id;
     final amountController = TextEditingController(
       text: (existing?.allocated ?? 100).toString(),
     );

@@ -210,9 +210,17 @@ class _TransactionEditorState extends State<_TransactionEditor> {
     super.initState();
     final repo = context.read<FinanceRepository>();
     final existing = widget.existing;
-    _type = existing?.type ?? TransactionType.expense;
+    // The editor only offers Expense / Income; a transfer row (from a full
+    // CSV import) would otherwise assert in SegmentedButton.
+    _type = existing == null || existing.type == TransactionType.transfer
+        ? TransactionType.expense
+        : existing.type;
     _visibility = existing?.visibility ?? VisibilityScope.shared;
-    _accountId = existing?.accountId ?? repo.accounts.first.id;
+    final existingAccount = existing?.accountId;
+    _accountId = existingAccount != null &&
+            repo.accounts.any((a) => a.id == existingAccount)
+        ? existingAccount
+        : repo.accounts.first.id;
     _currency = existing?.currencyCode ??
         repo.accounts
             .firstWhere(
@@ -412,7 +420,9 @@ class _TransactionEditorState extends State<_TransactionEditor> {
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             // ignore: deprecated_member_use
-            value: _accountId,
+            value: repo.accounts.any((a) => a.id == _accountId)
+                ? _accountId
+                : null,
             decoration: const InputDecoration(labelText: 'Account'),
             items: [
               for (final a in repo.accounts)

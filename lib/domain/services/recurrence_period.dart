@@ -47,17 +47,19 @@ enum RecurrencePeriod {
       case RecurrencePeriod.weekly:
         return date.add(const Duration(days: 7));
       case RecurrencePeriod.monthly:
-        return _addMonths(date, 1);
+        return addMonths(date, 1);
       case RecurrencePeriod.twoMonths:
-        return _addMonths(date, 2);
+        return addMonths(date, 2);
       case RecurrencePeriod.quarter:
-        return _addMonths(date, 3);
+        return addMonths(date, 3);
       case RecurrencePeriod.year:
-        return _addMonths(date, 12);
+        return addMonths(date, 12);
     }
   }
 
-  static DateTime _addMonths(DateTime date, int months) {
+  /// Calendar-month shift that clamps the day (Jan 31 + 1 → Feb 28/29),
+  /// unlike `DateTime(y, m + n, d)` which rolls Jan 31 into March.
+  static DateTime addMonths(DateTime date, int months) {
     final total = date.month - 1 + months;
     final year = date.year + total ~/ 12;
     final month = total % 12 + 1;

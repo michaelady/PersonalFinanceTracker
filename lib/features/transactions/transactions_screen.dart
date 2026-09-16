@@ -11,6 +11,7 @@ import '../../widgets/money_text.dart';
 import '../../widgets/responsive.dart';
 import '../../widgets/sheet_inset.dart';
 import '../../widgets/visibility_chip.dart';
+import '../../widgets/zentho_snackbar.dart';
 import '../bills/bill_scan_flow.dart';
 
 class TransactionsScreen extends StatelessWidget {
@@ -313,15 +314,12 @@ class _TransactionEditorState extends State<_TransactionEditor> {
     final messenger = ScaffoldMessenger.of(context);
     Navigator.pop(context);
     messenger.showSnackBar(
-      SnackBar(
-        content: Text(_isEditing ? 'Transaction updated' : 'Transaction saved'),
-        action: createdId == null
-            ? null
-            : SnackBarAction(
-                label: 'Undo',
-                onPressed: () => repo.deleteTransaction(createdId!),
-              ),
-      ),
+      createdId == null
+          ? const SnackBar(content: Text('Transaction updated'))
+          : undoSnackBar(
+              message: 'Transaction saved',
+              onUndo: () => repo.deleteTransaction(createdId!),
+            ),
     );
   }
 
@@ -482,18 +480,36 @@ class _TransactionEditorState extends State<_TransactionEditor> {
                 setState(() => _visibility = v ?? VisibilityScope.shared),
           ),
           const SizedBox(height: 8),
-          SwitchListTile(
+          CheckboxListTile(
+            key: const Key('transaction-recurring'),
             contentPadding: EdgeInsets.zero,
-            title: const Text('Recurring / subscription'),
+            controlAffinity: ListTileControlAffinity.leading,
+            title: Text(
+              _type == TransactionType.income
+                  ? 'Recurring income (salary, pension, rent received)'
+                  : 'Recurring bill / subscription',
+            ),
+            subtitle: Text(
+              _type == TransactionType.income
+                  ? 'Counted as assumed monthly income in Budgets predictions '
+                      'and Available to spend.'
+                  : 'Counted as an assumed monthly expense in Budgets '
+                      'predictions and Available to spend.',
+            ),
             value: _recurring,
-            activeThumbColor: ZenthoColors.tealDeep,
-            onChanged: (v) => setState(() => _recurring = v),
+            activeColor: ZenthoColors.tealDeep,
+            onChanged: (v) => setState(() => _recurring = v ?? false),
           ),
           if (_recurring) ...[
             DropdownButtonFormField<RecurrencePeriod>(
+              key: const Key('transaction-recurrence-period'),
               // ignore: deprecated_member_use
               value: _recurrencePeriod,
-              decoration: const InputDecoration(labelText: 'Recurs every'),
+              decoration: InputDecoration(
+                labelText: _type == TransactionType.income
+                    ? 'Paid every'
+                    : 'Recurs every',
+              ),
               items: [
                 for (final p in RecurrencePeriod.values)
                   DropdownMenuItem(value: p, child: Text(p.label)),

@@ -975,42 +975,31 @@ class QuoteUnavailable implements Exception {
     return error.toString().contains('Finnhub quote HTTP 403');
   }
 
-  /// Compact copy for the portfolio source line. Never dumps a Yahoo URL.
+  /// Compact, user-facing copy for the portfolio card. Never names vendors,
+  /// HTTP codes, or URLs — those belong in logs, not the GUI.
   static String shortMessage(Object error) {
     if (error is QuoteUnavailable) return error.toString();
-    final t = error.toString();
-    final cors = isYahooBrowserBlock(error) ||
-        t.contains('query1.finance.yahoo.com');
-    final fh403 = isFinnhubQuoteForbidden(error);
-    if (cors && fh403) {
-      return 'Browser CORS blocks Yahoo. Finnhub 403 for a non-US listing '
-          '(free key is US-only).';
+    if (isFinnhubQuoteForbidden(error)) {
+      return 'Live quotes for non-US listings are not included in the free '
+          'market-data plan.';
     }
-    if (cors) return 'Browser CORS blocks Yahoo.';
-    if (t.length > 160) return '${t.substring(0, 157)}...';
-    return t;
+    return 'Live quotes are not available right now.';
   }
 
   @override
   String toString() {
-    final bits = <String>[];
-    if (skippedYahoo || isYahooBrowserBlock(yahooError)) {
-      bits.add('Browser CORS blocks Yahoo');
-    }
     if (isFinnhubQuoteForbidden(finnhubError)) {
       final label = finnhubPackageLabel(symbol);
       if (label != null) {
-        bits.add('Finnhub 403 for $symbol (free key has no $label package)');
-      } else if (isNonUsListing(symbol)) {
-        bits.add('Finnhub 403 for $symbol (free key is US-only)');
-      } else {
-        bits.add('Finnhub 403 for $symbol');
+        return 'Live quotes for $symbol ($label) are not included in the '
+            'free market-data plan.';
       }
-    } else if (finnhubError != null) {
-      bits.add('Finnhub failed for $symbol');
+      if (isNonUsListing(symbol)) {
+        return 'Live quotes for $symbol are not included in the free '
+            'market-data plan (non-US listing).';
+      }
     }
-    if (bits.isEmpty) return 'Quotes unavailable for $symbol';
-    return bits.join('. ');
+    return 'Live quotes for $symbol are not available right now.';
   }
 }
 

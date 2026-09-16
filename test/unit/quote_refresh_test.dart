@@ -111,9 +111,11 @@ void main() {
     expect(repo.quotes['VTI']!.source, 'finnhub');
     expect(repo.quotes['NESN.SW']!.price, closeTo(80, 0.0001));
     expect(repo.quotesError, contains('Could not refresh NESN.SW'));
-    expect(repo.quotesError, contains('Browser CORS blocks Yahoo'));
     expect(repo.quotesError, contains('SIX Swiss'));
     expect(repo.quotesError, isNot(contains('query1.finance.yahoo.com')));
+    expect(repo.quotesError, isNot(contains('CORS')));
+    expect(repo.quotesError, isNot(contains('Finnhub')));
+    expect(repo.quotesError, isNot(contains('403')));
     expect(
       repo.quotesError,
       isNot(contains('Could not refresh quotes —')),
@@ -138,7 +140,7 @@ void main() {
     expect(client.calls, ['NESN.SW']);
     expect(repo.quotes['VTI']!.price, closeTo(200, 0.0001));
     expect(repo.quotesError, contains('Could not refresh NESN.SW'));
-    expect(repo.quotesError, contains('Browser CORS blocks Yahoo'));
+    expect(repo.quotesError, isNot(contains('CORS')));
     expect(
       repo.quotesError,
       isNot(contains('Could not refresh quotes —')),

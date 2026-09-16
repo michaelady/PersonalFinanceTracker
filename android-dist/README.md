@@ -2,10 +2,10 @@
 
 Sideload installers for testing on a phone. Most modern phones want **`Zentho-arm64.apk`**.
 
-Current build: **1.0.2+10** (versionCode 10), release, debug-signed, from the
-*Build Android APK* run for PR #28 (`5d6079d`). Undo snackbars dismiss after
-30 s; income can be flagged "Recurring income" with a pay cadence so Budgets
-predictions count it. New ledgers start empty.
+Current build: **1.0.3+11** (versionCode 11), release, debug-signed, from the
+*Build Android APK* run for PR #29 (`8bb2233`). Developer-oriented wording
+(quote vendors, web-vs-app notes, HTTP codes) is gone from the GUI; quote
+problems are now described in plain language.
 
 ## Install
 

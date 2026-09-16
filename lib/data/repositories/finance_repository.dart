@@ -1297,7 +1297,7 @@ class FinanceRepository extends ChangeNotifier {
           ].join(' ');
         } else {
           quotesError = resolveFinnhubToken(userToken: finnhubToken) == null
-              ? 'Quotes unavailable. On the website, add a free Finnhub token in Settings. Browser CORS blocks Yahoo.'
+              ? 'Quotes unavailable. Add a free market-data key in Settings to enable live quotes.'
               : (detail ?? 'Could not refresh quotes.');
         }
       }

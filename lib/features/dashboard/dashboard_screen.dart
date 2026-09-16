@@ -384,7 +384,7 @@ class _InvestmentsPreview extends StatelessWidget {
       ),
       child: empty
           ? Text(
-              'Add lots on the Invest tab. Market value (or last cached quote) '
+              'Add lots on the Invest tab. Market value (or last saved price) '
               'rolls into net worth above.',
               style: Theme.of(context).textTheme.bodyMedium,
             )

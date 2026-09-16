@@ -13,7 +13,7 @@ Live web (also hosts the privacy placeholder): https://michaelady.github.io/Pers
 | App name (listing + launcher) | Zentho |
 | Dart package (`pubspec.yaml` `name`) | `zentho` |
 | Android `applicationId` / `namespace` | `com.zentho.zentho` |
-| Version | `pubspec.yaml` `version: 1.0.0+8` → Play `versionName` **1.0.0**, `versionCode` **8** |
+| Version | `pubspec.yaml` `version: 1.0.1+9` → Play `versionName` **1.0.1**, `versionCode` **9** |
 
 Play treats `applicationId` as the app’s identity. Changing it later creates a different app.
 

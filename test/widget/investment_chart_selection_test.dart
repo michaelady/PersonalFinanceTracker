@@ -223,11 +223,109 @@ void main() {
     expect(latestChartValue(tester), closeTo(320, 0.01));
   });
 
+  testWidgets('allocation and transactions details start collapsed',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHoldings();
+    final tx = ShareTransaction.create(
+      holdingId: repo.apple.id,
+      type: ShareTransactionType.buy,
+      date: DateTime.utc(2026, 1, 1),
+      shares: 2,
+      pricePerShare: 100,
+    );
+    repo.shareTransactions = [tx];
+    repo.notifyListeners();
+    await pumpInvestments(tester, repo);
+
+    expect(find.byKey(const Key('toggle-allocation')), findsOneWidget);
+    expect(find.byKey(const Key('toggle-transactions')), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('allocation-toggle-label'))).data,
+      'Show',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('transactions-toggle-label')))
+          .data,
+      'Show',
+    );
+    expect(find.byKey(ValueKey('allocation-${repo.apple.id}')), findsNothing);
+    expect(
+      find.byKey(ValueKey('allocation-${repo.microsoft.id}')),
+      findsNothing,
+    );
+    expect(find.byKey(ValueKey('share-tx-${tx.id}')), findsNothing);
+    expect(find.byKey(ValueKey('holding-${repo.apple.id}')), findsOneWidget);
+  });
+
+  testWidgets(
+      'allocation and transactions expand and collapse from the section button',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHoldings();
+    final tx = ShareTransaction.create(
+      holdingId: repo.apple.id,
+      type: ShareTransactionType.buy,
+      date: DateTime.utc(2026, 1, 1),
+      shares: 2,
+      pricePerShare: 100,
+    );
+    repo.shareTransactions = [tx];
+    repo.notifyListeners();
+    await pumpInvestments(tester, repo);
+
+    await tester.ensureVisible(find.byKey(const Key('toggle-allocation')));
+    await tester.tap(find.byKey(const Key('toggle-allocation')));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<Text>(find.byKey(const Key('allocation-toggle-label'))).data,
+      'Hide',
+    );
+    expect(find.byKey(ValueKey('allocation-${repo.apple.id}')), findsOneWidget);
+    expect(find.byKey(ValueKey('share-tx-${tx.id}')), findsNothing);
+
+    await tester.ensureVisible(find.byKey(const Key('toggle-transactions')));
+    await tester.tap(find.byKey(const Key('toggle-transactions')));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('transactions-toggle-label')))
+          .data,
+      'Hide',
+    );
+    expect(find.byKey(ValueKey('share-tx-${tx.id}')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('toggle-allocation')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<Text>(find.byKey(const Key('allocation-toggle-label'))).data,
+      'Show',
+    );
+    expect(find.byKey(ValueKey('allocation-${repo.apple.id}')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('toggle-transactions')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('transactions-toggle-label')))
+          .data,
+      'Show',
+    );
+    expect(find.byKey(ValueKey('share-tx-${tx.id}')), findsNothing);
+  });
+
   testWidgets('allocation row can select the same holding series',
       (tester) async {
     final repo = MemoryStoreRepo();
     await repo.seedHoldings();
     await pumpInvestments(tester, repo);
+
+    await tester.ensureVisible(find.byKey(const Key('toggle-allocation')));
+    await tester.tap(find.byKey(const Key('toggle-allocation')));
+    await tester.pumpAndSettle();
 
     await tester.ensureVisible(
       find.byKey(ValueKey('allocation-${repo.microsoft.id}')),
@@ -417,6 +515,14 @@ void main() {
       findsOneWidget,
     );
     expect(find.textContaining('Lifetime'), findsWidgets);
+    expect(
+      find.byKey(ValueKey('allocation-perf-${repo.apple.id}')),
+      findsNothing,
+    );
+
+    await tester.ensureVisible(find.byKey(const Key('toggle-allocation')));
+    await tester.tap(find.byKey(const Key('toggle-allocation')));
+    await tester.pumpAndSettle();
     expect(
       find.byKey(ValueKey('allocation-perf-${repo.apple.id}')),
       findsOneWidget,

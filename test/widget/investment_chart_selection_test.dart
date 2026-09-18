@@ -7,6 +7,7 @@ import 'package:zentho/data/services/quote_client.dart';
 import 'package:zentho/domain/models/models.dart';
 import 'package:zentho/domain/services/portfolio_math.dart';
 import 'package:zentho/features/investments/investments_screen.dart';
+import 'package:zentho/features/shell/app_shell.dart';
 import 'package:zentho/theme/zentho_colors.dart';
 import 'package:zentho/widgets/money_text.dart';
 
@@ -149,6 +150,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
   }
 
+  Future<void> expandHoldings(WidgetTester tester) async {
+    final toggle = find.byKey(const Key('toggle-holdings'));
+    await tester.ensureVisible(toggle);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+  }
+
   double latestChartValue(WidgetTester tester) {
     return tester
         .widget<MoneyText>(find.byKey(const Key('chart-latest')))
@@ -183,6 +191,7 @@ void main() {
     final repo = MemoryStoreRepo();
     await repo.seedHoldings();
     await pumpInvestments(tester, repo);
+    await expandHoldings(tester);
 
     await tester.ensureVisible(find.byKey(ValueKey('holding-${repo.apple.id}')));
     await tester.tap(find.byKey(ValueKey('holding-${repo.apple.id}')));
@@ -200,6 +209,7 @@ void main() {
     final repo = MemoryStoreRepo();
     await repo.seedHoldings();
     await pumpInvestments(tester, repo);
+    await expandHoldings(tester);
 
     final appleTile = find.byKey(ValueKey('holding-${repo.apple.id}'));
     await tester.ensureVisible(appleTile);
@@ -220,6 +230,7 @@ void main() {
     final repo = MemoryStoreRepo();
     await repo.seedHoldings();
     await pumpInvestments(tester, repo);
+    await expandHoldings(tester);
 
     await tester.ensureVisible(find.byKey(ValueKey('holding-${repo.apple.id}')));
     await tester.tap(find.byKey(ValueKey('holding-${repo.apple.id}')));
@@ -233,7 +244,7 @@ void main() {
     expect(latestChartValue(tester), closeTo(320, 0.01));
   });
 
-  testWidgets('allocation and transactions details start collapsed',
+  testWidgets('allocation, holdings, and transactions details start collapsed',
       (tester) async {
     final repo = MemoryStoreRepo();
     await repo.seedHoldings();
@@ -249,9 +260,14 @@ void main() {
     await pumpInvestments(tester, repo);
 
     expect(find.byKey(const Key('toggle-allocation')), findsOneWidget);
+    expect(find.byKey(const Key('toggle-holdings')), findsOneWidget);
     expect(find.byKey(const Key('toggle-transactions')), findsOneWidget);
     expect(
       tester.widget<Text>(find.byKey(const Key('allocation-toggle-label'))).data,
+      'Show',
+    );
+    expect(
+      tester.widget<Text>(find.byKey(const Key('holdings-toggle-label'))).data,
       'Show',
     );
     expect(
@@ -266,11 +282,12 @@ void main() {
       findsNothing,
     );
     expect(find.byKey(ValueKey('share-tx-${tx.id}')), findsNothing);
-    expect(find.byKey(ValueKey('holding-${repo.apple.id}')), findsOneWidget);
+    expect(find.byKey(ValueKey('holding-${repo.apple.id}')), findsNothing);
+    expect(find.byKey(ValueKey('holding-${repo.microsoft.id}')), findsNothing);
   });
 
   testWidgets(
-      'allocation and transactions expand and collapse from the section button',
+      'allocation, holdings, and transactions expand and collapse from the section button',
       (tester) async {
     final repo = MemoryStoreRepo();
     await repo.seedHoldings();
@@ -294,7 +311,16 @@ void main() {
       'Hide',
     );
     expect(find.byKey(ValueKey('allocation-${repo.apple.id}')), findsOneWidget);
+    expect(find.byKey(ValueKey('holding-${repo.apple.id}')), findsNothing);
     expect(find.byKey(ValueKey('share-tx-${tx.id}')), findsNothing);
+
+    await expandHoldings(tester);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('holdings-toggle-label'))).data,
+      'Hide',
+    );
+    expect(find.byKey(ValueKey('holding-${repo.apple.id}')), findsOneWidget);
+    expect(find.byKey(ValueKey('holding-${repo.microsoft.id}')), findsOneWidget);
 
     await tester.ensureVisible(find.byKey(const Key('toggle-transactions')));
     await tester.tap(find.byKey(const Key('toggle-transactions')));
@@ -315,6 +341,15 @@ void main() {
       'Show',
     );
     expect(find.byKey(ValueKey('allocation-${repo.apple.id}')), findsNothing);
+
+    await tester.ensureVisible(find.byKey(const Key('toggle-holdings')));
+    await tester.tap(find.byKey(const Key('toggle-holdings')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<Text>(find.byKey(const Key('holdings-toggle-label'))).data,
+      'Show',
+    );
+    expect(find.byKey(ValueKey('holding-${repo.apple.id}')), findsNothing);
 
     await tester.tap(find.byKey(const Key('toggle-transactions')));
     await tester.pumpAndSettle();
@@ -351,6 +386,7 @@ void main() {
     final repo = MemoryStoreRepo();
     await repo.seedHoldings();
     await pumpInvestments(tester, repo);
+    await expandHoldings(tester);
 
     await tester.ensureVisible(
       find.byKey(ValueKey('edit-holding-${repo.apple.id}')),
@@ -368,6 +404,7 @@ void main() {
     final repo = MemoryStoreRepo();
     await repo.seedHoldings();
     await pumpInvestments(tester, repo);
+    await expandHoldings(tester);
 
     await tester.ensureVisible(find.byKey(ValueKey('holding-${repo.apple.id}')));
     await tester.longPress(find.byKey(ValueKey('holding-${repo.apple.id}')));
@@ -518,6 +555,12 @@ void main() {
 
     expect(
       find.byKey(ValueKey('holding-day-${repo.apple.id}')),
+      findsNothing,
+    );
+
+    await expandHoldings(tester);
+    expect(
+      find.byKey(ValueKey('holding-day-${repo.apple.id}')),
       findsOneWidget,
     );
     expect(
@@ -607,5 +650,63 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(repo.refreshForceFlags, [true]);
+  });
+
+  testWidgets(
+      'Invest + Holding FAB stays present and does not overlap Show/Hide controls',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHoldings();
+
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FinanceRepository>.value(
+        value: repo,
+        child: const MaterialApp(home: AppShell()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    await tester.tap(find.text('Invest'));
+    await tester.pumpAndSettle();
+
+    final fab = find.byKey(const Key('add-holding-fab'));
+    expect(fab, findsOneWidget);
+    expect(find.widgetWithText(FloatingActionButton, 'Holding'), findsOneWidget);
+
+    expect(find.byKey(const Key('toggle-allocation')), findsOneWidget);
+    expect(find.byKey(const Key('toggle-holdings')), findsOneWidget);
+    expect(find.byKey(const Key('toggle-transactions')), findsOneWidget);
+    expect(find.byKey(ValueKey('holding-${repo.apple.id}')), findsNothing);
+
+    final fabRect = tester.getRect(fab);
+    for (final key in const [
+      Key('toggle-allocation'),
+      Key('toggle-holdings'),
+      Key('toggle-transactions'),
+    ]) {
+      final toggle = find.byKey(key);
+      expect(tester.getRect(toggle).overlaps(fabRect), isFalse);
+    }
+
+    await tester.ensureVisible(find.byKey(const Key('toggle-holdings')));
+    await tester.tap(find.byKey(const Key('toggle-holdings')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey('holding-${repo.apple.id}')), findsOneWidget);
+
+    for (final key in const [
+      Key('toggle-allocation'),
+      Key('toggle-holdings'),
+      Key('toggle-transactions'),
+    ]) {
+      await tester.ensureVisible(find.byKey(key));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(find.byKey(key)).overlaps(fabRect), isFalse);
+    }
   });
 }

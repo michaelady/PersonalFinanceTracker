@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zentho/data/repositories/finance_repository.dart';
 import 'package:zentho/domain/models/models.dart';
+import 'package:zentho/features/dashboard/dashboard_screen.dart';
 import 'package:zentho/features/reports/reports_screen.dart';
 import 'package:zentho/features/shell/app_shell.dart';
 import 'package:zentho/widgets/money_text.dart';
@@ -380,7 +381,7 @@ void main() {
       dividendAmount: 25,
     );
 
-    tester.view.physicalSize = const Size(400, 900);
+    tester.view.physicalSize = const Size(400, 2000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -388,12 +389,9 @@ void main() {
     await tester.pumpWidget(
       ChangeNotifierProvider<FinanceRepository>.value(
         value: repo,
-        child: const MaterialApp(home: AppShell()),
+        child: const MaterialApp(home: Scaffold(body: DashboardScreen())),
       ),
     );
-    await tester.pump();
-
-    await tester.ensureVisible(find.text('Investments'));
     await tester.pump();
 
     expect(find.text('1 holding'), findsOneWidget);
@@ -401,6 +399,11 @@ void main() {
     expect(find.text('Unrealized'), findsOneWidget);
     expect(find.text('Realized + dividends'), findsOneWidget);
     expect(find.text('Day'), findsNothing);
+
+    for (final label in ['Market value', 'Unrealized', 'Realized + dividends']) {
+      final paragraph = tester.renderObject<RenderParagraph>(find.text(label));
+      expect(paragraph.didExceedMaxLines, isFalse, reason: '$label overflowed');
+    }
 
     expect(repo.portfolio.marketMain, closeTo(1500, 0.01));
     expect(repo.portfolio.unrealizedPlMain, closeTo(500, 0.01));
@@ -429,7 +432,7 @@ void main() {
     final repo = MemoryStoreRepo();
     await repo.seedHousehold();
 
-    tester.view.physicalSize = const Size(400, 900);
+    tester.view.physicalSize = const Size(400, 2000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -437,12 +440,9 @@ void main() {
     await tester.pumpWidget(
       ChangeNotifierProvider<FinanceRepository>.value(
         value: repo,
-        child: const MaterialApp(home: AppShell()),
+        child: const MaterialApp(home: Scaffold(body: DashboardScreen())),
       ),
     );
-    await tester.pump();
-
-    await tester.ensureVisible(find.text('Investments'));
     await tester.pump();
 
     expect(find.text('Market value'), findsNothing);

@@ -177,9 +177,47 @@ class PortfolioTotals {
 abstract final class PortfolioMath {
   static const quoteCacheTtl = Duration(minutes: 5);
 
+  /// Invest portfolio card auto-refresh: same 5-minute product rule as
+  /// [quoteCacheTtl]. Refresh when the last successful fetch is *older than*
+  /// this duration.
+  static const portfolioAutoRefreshAfter = quoteCacheTtl;
+
   static bool quoteIsFresh(DateTime fetchedAt, {DateTime? now}) {
     final t = now ?? DateTime.now().toUtc();
     return t.difference(fetchedAt.toUtc()) <= quoteCacheTtl;
+  }
+
+  /// Newest successful quote stamp: session [quotesUpdatedAt], else the
+  /// latest cached [CachedQuote.fetchedAt].
+  static DateTime? lastQuoteRefreshAt({
+    DateTime? quotesUpdatedAt,
+    Iterable<CachedQuote> quotes = const [],
+  }) {
+    DateTime? latest = quotesUpdatedAt?.toUtc();
+    for (final quote in quotes) {
+      final at = quote.fetchedAt.toUtc();
+      if (latest == null || at.isAfter(latest)) latest = at;
+    }
+    return latest;
+  }
+
+  /// One auto-refresh per 5-minute eligibility window. Skips in-flight work
+  /// and a recent attempt after a failed refresh.
+  static bool shouldAutoRefreshQuotes({
+    DateTime? lastSuccessful,
+    required bool refreshing,
+    DateTime? lastAttempted,
+    DateTime? now,
+  }) {
+    if (refreshing) return false;
+    final t = (now ?? DateTime.now()).toUtc();
+    if (lastSuccessful != null && quoteIsFresh(lastSuccessful, now: t)) {
+      return false;
+    }
+    if (lastAttempted != null && quoteIsFresh(lastAttempted, now: t)) {
+      return false;
+    }
+    return true;
   }
 
   static double _rate(

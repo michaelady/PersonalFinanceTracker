@@ -106,6 +106,31 @@ class FinanceRepository extends ChangeNotifier {
   String? quotesError;
   String? quotesSource;
   DateTime? quotesUpdatedAt;
+  DateTime? quotesAutoRefreshAttemptedAt;
+
+  /// Last successful quote refresh: session stamp, else newest cached fetch.
+  DateTime? get lastSuccessfulQuoteRefresh => PortfolioMath.lastQuoteRefreshAt(
+        quotesUpdatedAt: quotesUpdatedAt,
+        quotes: quotes.values,
+      );
+
+  /// Same path as the Invest portfolio refresh button, if last success is
+  /// older than 5 minutes. No-ops while a refresh is in flight or this
+  /// eligibility window already attempted.
+  Future<void> maybeAutoRefreshQuotes({DateTime? now}) async {
+    if (visibleHoldings.isEmpty) return;
+    final t = (now ?? DateTime.now()).toUtc();
+    if (!PortfolioMath.shouldAutoRefreshQuotes(
+      lastSuccessful: lastSuccessfulQuoteRefresh,
+      refreshing: quotesRefreshing,
+      lastAttempted: quotesAutoRefreshAttemptedAt,
+      now: t,
+    )) {
+      return;
+    }
+    quotesAutoRefreshAttemptedAt = t;
+    await refreshQuotes(force: true);
+  }
 
   Future<void> init() async {
     loading = true;
@@ -574,6 +599,7 @@ class FinanceRepository extends ChangeNotifier {
     quotesError = null;
     quotesSource = null;
     quotesUpdatedAt = null;
+    quotesAutoRefreshAttemptedAt = null;
     snapshotUpdatedAt = DateTime.now().toUtc();
     lastCloudSyncedAt = null;
     accountSyncMessage = null;

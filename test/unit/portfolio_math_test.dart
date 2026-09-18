@@ -957,5 +957,89 @@ void main() {
       expect(series.first.date, DateTime.utc(2026, 8, 1));
       expect(series.first.close, closeTo(200, 0.01));
     });
+
+    test('lastQuoteRefreshAt prefers the newest session or cached stamp', () {
+      final older = quote(symbol: 'AAPL', price: 120);
+      final newer = quote(symbol: 'MSFT', price: 80).copyWith(
+        fetchedAt: DateTime.utc(2026, 9, 2, 12, 4),
+      );
+      expect(
+        PortfolioMath.lastQuoteRefreshAt(quotes: [older, newer]),
+        DateTime.utc(2026, 9, 2, 12, 4),
+      );
+      expect(
+        PortfolioMath.lastQuoteRefreshAt(
+          quotesUpdatedAt: DateTime.utc(2026, 9, 2, 12, 10),
+          quotes: [older, newer],
+        ),
+        DateTime.utc(2026, 9, 2, 12, 10),
+      );
+      expect(PortfolioMath.lastQuoteRefreshAt(), isNull);
+    });
+
+    test('shouldAutoRefreshQuotes is stale after 5 minutes, not at exactly 5',
+        () {
+      final now = DateTime.utc(2026, 9, 2, 12, 10);
+      expect(
+        PortfolioMath.shouldAutoRefreshQuotes(
+          lastSuccessful: now.subtract(const Duration(minutes: 5)),
+          refreshing: false,
+          now: now,
+        ),
+        isFalse,
+      );
+      expect(
+        PortfolioMath.shouldAutoRefreshQuotes(
+          lastSuccessful: now.subtract(
+            const Duration(minutes: 5, seconds: 1),
+          ),
+          refreshing: false,
+          now: now,
+        ),
+        isTrue,
+      );
+      expect(
+        PortfolioMath.shouldAutoRefreshQuotes(
+          lastSuccessful: now.subtract(const Duration(minutes: 1)),
+          refreshing: false,
+          now: now,
+        ),
+        isFalse,
+      );
+      expect(
+        PortfolioMath.shouldAutoRefreshQuotes(
+          lastSuccessful: now.subtract(const Duration(minutes: 10)),
+          refreshing: true,
+          now: now,
+        ),
+        isFalse,
+      );
+      expect(
+        PortfolioMath.shouldAutoRefreshQuotes(
+          lastSuccessful: now.subtract(const Duration(minutes: 10)),
+          refreshing: false,
+          lastAttempted: now.subtract(const Duration(minutes: 1)),
+          now: now,
+        ),
+        isFalse,
+      );
+      expect(
+        PortfolioMath.shouldAutoRefreshQuotes(
+          lastSuccessful: now.subtract(const Duration(minutes: 10)),
+          refreshing: false,
+          lastAttempted: now.subtract(const Duration(minutes: 6)),
+          now: now,
+        ),
+        isTrue,
+      );
+      expect(
+        PortfolioMath.shouldAutoRefreshQuotes(
+          lastSuccessful: null,
+          refreshing: false,
+          now: now,
+        ),
+        isTrue,
+      );
+    });
   });
 }

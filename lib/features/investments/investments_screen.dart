@@ -104,23 +104,46 @@ class InvestmentsScreen extends StatefulWidget {
   State<InvestmentsScreen> createState() => _InvestmentsScreenState();
 }
 
-class _InvestmentsScreenState extends State<InvestmentsScreen> {
+class _InvestmentsScreenState extends State<InvestmentsScreen>
+    with WidgetsBindingObserver {
   QuoteHistoryRange _range = QuoteHistoryRange.oneMonth;
   String? _chartHoldingId;
+  var _allocationExpanded = false;
+  var _transactionsExpanded = false;
   final _scrollController = ScrollController();
   final _chartKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return;
+    _scheduleQuoteAutoRefresh();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _scheduleQuoteAutoRefresh();
+    }
+  }
+
+  void _scheduleQuoteAutoRefresh() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<FinanceRepository>().refreshQuotes();
+      context.read<FinanceRepository>().maybeAutoRefreshQuotes();
     });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scrollController.dispose();
     super.dispose();
   }
@@ -221,18 +244,23 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              Text(
-                'Allocation',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              ...holdings.map(
-                (v) => _AllocationRow(
-                  valuation: v,
-                  currency: currency,
-                  selected: chartHoldingId == v.holding.id,
-                  onTap: () => _toggleChartHolding(v.holding.id),
+              _CollapsibleDetails(
+                toggleKey: const Key('toggle-allocation'),
+                labelKey: const Key('allocation-toggle-label'),
+                title: 'Allocation',
+                expanded: _allocationExpanded,
+                onToggle: () => setState(
+                  () => _allocationExpanded = !_allocationExpanded,
                 ),
+                children: [
+                  for (final v in holdings)
+                    _AllocationRow(
+                      valuation: v,
+                      currency: currency,
+                      selected: chartHoldingId == v.holding.id,
+                      onTap: () => _toggleChartHolding(v.holding.id),
+                    ),
+                ],
               ),
               const SizedBox(height: 24),
               Text(
@@ -256,33 +284,121 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              Text(
-                'Transactions',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              if (repo.visibleShareTransactions.isEmpty)
-                Text(
-                  'Record buys, sells, dividends, fees, and splits. Holdings '
-                  'and P/L update from this list.',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                )
-              else
-                ...repo.visibleShareTransactions.map(
-                  (tx) => _ShareTransactionTile(
-                    tx: tx,
-                    holding: repo.holdingById(tx.holdingId),
-                    onTap: () => InvestmentsScreen.showShareTransactionEditor(
-                      context,
-                      repo,
-                      existing: tx,
-                    ),
-                  ),
+              _CollapsibleDetails(
+                toggleKey: const Key('toggle-transactions'),
+                labelKey: const Key('transactions-toggle-label'),
+                title: 'Transactions',
+                expanded: _transactionsExpanded,
+                onToggle: () => setState(
+                  () => _transactionsExpanded = !_transactionsExpanded,
                 ),
+                children: [
+                  if (repo.visibleShareTransactions.isEmpty)
+                    Text(
+                      'Record buys, sells, dividends, fees, and splits. Holdings '
+                      'and P/L update from this list.',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    )
+                  else
+                    for (final tx in repo.visibleShareTransactions)
+                      _ShareTransactionTile(
+                        tx: tx,
+                        holding: repo.holdingById(tx.holdingId),
+                        onTap: () =>
+                            InvestmentsScreen.showShareTransactionEditor(
+                          context,
+                          repo,
+                          existing: tx,
+                        ),
+                      ),
+                ],
+              ),
             ],
           ],
         ),
       ),
+    );
+  }
+}
+
+class _CollapsibleDetails extends StatelessWidget {
+  const _CollapsibleDetails({
+    required this.toggleKey,
+    required this.labelKey,
+    required this.title,
+    required this.expanded,
+    required this.onToggle,
+    required this.children,
+  });
+
+  final Key toggleKey;
+  final Key labelKey;
+  final String title;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final action = expanded ? 'Hide' : 'Show';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Tooltip(
+          message: '$action $title',
+          child: Material(
+            color: Colors.white.withValues(alpha: 0.55),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: ZenthoColors.line),
+            ),
+            child: InkWell(
+              key: toggleKey,
+              borderRadius: BorderRadius.circular(14),
+              onTap: onToggle,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                    Text(
+                      action,
+                      key: labelKey,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                            color: ZenthoColors.tealDeep,
+                          ),
+                    ),
+                    const SizedBox(width: 4),
+                    AnimatedRotation(
+                      turns: expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Icon(
+                        Icons.expand_more,
+                        color: ZenthoColors.tealDeep,
+                        semanticLabel: expanded
+                            ? 'Collapse $title'
+                            : 'Expand $title',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (expanded) ...[
+          const SizedBox(height: 8),
+          ...children,
+        ],
+      ],
     );
   }
 }

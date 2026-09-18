@@ -140,6 +140,10 @@ void main() {
     await pumpInvestments(tester, repo);
 
     final tx = repo.shareTransactions.single;
+    await tester.ensureVisible(find.byKey(const Key('toggle-transactions')));
+    await tester.tap(find.byKey(const Key('toggle-transactions')));
+    await tester.pumpAndSettle();
+
     await tester.ensureVisible(find.byKey(ValueKey('share-tx-${tx.id}')));
     await tester.tap(find.byKey(ValueKey('share-tx-${tx.id}')));
     await tester.pumpAndSettle();

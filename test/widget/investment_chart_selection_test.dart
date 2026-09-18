@@ -658,7 +658,113 @@ void main() {
     final repo = MemoryStoreRepo();
     await repo.seedHoldings();
 
-    tester.view.physicalSize = const Size(400, 800);
+    tester.view.physicalSize = const Size(800, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FinanceRepository>.value(
+        value: repo,
+        child: MaterialApp(
+          home: Scaffold(
+            appBar: AppBar(title: const Text('Zentho')),
+            body: const InvestmentsScreen(),
+            floatingActionButton: FloatingActionButton.extended(
+              key: const Key('add-holding-fab'),
+              onPressed: () {},
+              backgroundColor: ZenthoColors.tealDeep,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('Holding'),
+            ),
+            bottomNavigationBar: NavigationBar(
+              selectedIndex: 5,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.dashboard_outlined),
+                  label: 'Home',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.swap_horiz_outlined),
+                  label: 'Activity',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.insights_outlined),
+                  label: 'Reports',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.pie_chart_outline),
+                  label: 'Budgets',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.flag_outlined),
+                  label: 'Goals',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.show_chart_outlined),
+                  label: 'Invest',
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final fab = find.byKey(const Key('add-holding-fab'));
+    expect(fab, findsOneWidget);
+    expect(find.widgetWithText(FloatingActionButton, 'Holding'), findsOneWidget);
+    expect(find.text('Investments'), findsOneWidget);
+    expect(find.byKey(ValueKey('holding-${repo.apple.id}')), findsNothing);
+
+    final list = find.descendant(
+      of: find.byType(InvestmentsScreen),
+      matching: find.byType(Scrollable),
+    );
+    final fabRect = tester.getRect(fab);
+
+    Future<void> expectToggleClearOfFab(Key key) async {
+      await tester.scrollUntilVisible(find.byKey(key), 240, scrollable: list);
+      final toggle = find.byKey(key);
+      expect(toggle, findsOneWidget);
+      await Scrollable.ensureVisible(
+        tester.element(toggle),
+        alignment: 1,
+        duration: Duration.zero,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(toggle).overlaps(fabRect),
+        isFalse,
+        reason: '$key overlaps the + Holding FAB',
+      );
+    }
+
+    await expectToggleClearOfFab(const Key('toggle-allocation'));
+    await expectToggleClearOfFab(const Key('toggle-holdings'));
+    await expectToggleClearOfFab(const Key('toggle-transactions'));
+
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('toggle-holdings')),
+      -240,
+      scrollable: list,
+    );
+    await tester.tap(find.byKey(const Key('toggle-holdings')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey('holding-${repo.apple.id}')), findsOneWidget);
+
+    await expectToggleClearOfFab(const Key('toggle-holdings'));
+    await expectToggleClearOfFab(const Key('toggle-transactions'));
+  });
+
+  testWidgets('AppShell Invest tab shows the + Holding FAB', (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHoldings();
+
+    tester.view.physicalSize = const Size(400, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -675,38 +781,8 @@ void main() {
     await tester.tap(find.text('Invest'));
     await tester.pumpAndSettle();
 
-    final fab = find.byKey(const Key('add-holding-fab'));
-    expect(fab, findsOneWidget);
+    expect(find.byKey(const Key('add-holding-fab')), findsOneWidget);
     expect(find.widgetWithText(FloatingActionButton, 'Holding'), findsOneWidget);
-
-    expect(find.byKey(const Key('toggle-allocation')), findsOneWidget);
-    expect(find.byKey(const Key('toggle-holdings')), findsOneWidget);
-    expect(find.byKey(const Key('toggle-transactions')), findsOneWidget);
-    expect(find.byKey(ValueKey('holding-${repo.apple.id}')), findsNothing);
-
-    final fabRect = tester.getRect(fab);
-    for (final key in const [
-      Key('toggle-allocation'),
-      Key('toggle-holdings'),
-      Key('toggle-transactions'),
-    ]) {
-      final toggle = find.byKey(key);
-      expect(tester.getRect(toggle).overlaps(fabRect), isFalse);
-    }
-
-    await tester.ensureVisible(find.byKey(const Key('toggle-holdings')));
-    await tester.tap(find.byKey(const Key('toggle-holdings')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(ValueKey('holding-${repo.apple.id}')), findsOneWidget);
-
-    for (final key in const [
-      Key('toggle-allocation'),
-      Key('toggle-holdings'),
-      Key('toggle-transactions'),
-    ]) {
-      await tester.ensureVisible(find.byKey(key));
-      await tester.pumpAndSettle();
-      expect(tester.getRect(find.byKey(key)).overlaps(fabRect), isFalse);
-    }
+    expect(find.text('Investments'), findsOneWidget);
   });
 }

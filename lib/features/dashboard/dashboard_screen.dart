@@ -397,26 +397,72 @@ class _InvestmentsPreview extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 6),
-                MoneyText(portfolio.marketMain, currencyCode: currency),
+                _InvestmentSumRow(
+                  label: 'Market value',
+                  amount: portfolio.marketMain,
+                  currency: currency,
+                ),
                 if (portfolio.unrealizedPlMain != null) ...[
                   const SizedBox(height: 4),
-                  MoneyText(
-                    portfolio.unrealizedPlMain!,
-                    currencyCode: currency,
+                  _InvestmentSumRow(
+                    label: 'Unrealized',
+                    amount: portfolio.unrealizedPlMain!,
+                    currency: currency,
                     signed: true,
                   ),
                 ],
                 if (portfolio.realizedPlMain != 0 ||
                     portfolio.dividendMain != 0) ...[
                   const SizedBox(height: 4),
-                  MoneyText(
-                    portfolio.realizedPlMain + portfolio.dividendMain,
-                    currencyCode: currency,
+                  _InvestmentSumRow(
+                    label: 'Realized + dividends',
+                    amount: portfolio.realizedPlMain + portfolio.dividendMain,
+                    currency: currency,
                     signed: true,
                   ),
                 ],
               ],
             ),
+    );
+  }
+}
+
+class _InvestmentSumRow extends StatelessWidget {
+  const _InvestmentSumRow({
+    required this.label,
+    required this.amount,
+    required this.currency,
+    this.signed = false,
+  });
+
+  final String label;
+  final double amount;
+  final String currency;
+  final bool signed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: ZenthoColors.inkMuted,
+                  ),
+            ),
+          ),
+        ),
+        MoneyText(
+          amount,
+          currencyCode: currency,
+          signed: signed,
+        ),
+      ],
     );
   }
 }

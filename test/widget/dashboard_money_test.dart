@@ -114,6 +114,50 @@ class MemoryStoreRepo extends FinanceRepository {
     loading = false;
     notifyListeners();
   }
+
+  void seedPortfolio({
+    required double shares,
+    required double averageCostPerShare,
+    required double quotePrice,
+    double dividendAmount = 0,
+  }) {
+    final holding = InvestmentHolding.create(
+      ticker: 'AAPL',
+      displayName: 'Apple',
+      shares: shares,
+      averageCostPerShare: averageCostPerShare,
+      currencyCode: 'USD',
+      ownerProfileId: you.id,
+      visibility: VisibilityScope.shared,
+    );
+    holdings = [holding];
+    shareTransactions = [
+      ShareTransaction.create(
+        holdingId: holding.id,
+        type: ShareTransactionType.buy,
+        date: DateTime.utc(2026, 1, 1),
+        shares: shares,
+        pricePerShare: averageCostPerShare,
+      ),
+      if (dividendAmount != 0)
+        ShareTransaction.create(
+          holdingId: holding.id,
+          type: ShareTransactionType.dividend,
+          date: DateTime.utc(2026, 3, 1),
+          amount: dividendAmount,
+        ),
+    ];
+    quotes = {
+      'AAPL': CachedQuote(
+        symbol: 'AAPL',
+        price: quotePrice,
+        currency: 'USD',
+        fetchedAt: DateTime.utc(2026, 9, 1),
+        source: 'test',
+      ),
+    };
+    notifyListeners();
+  }
 }
 
 void main() {
@@ -323,5 +367,90 @@ void main() {
       expect(paragraph.didExceedMaxLines, isFalse);
       expect(paragraph.size.height, greaterThanOrEqualTo(16));
     }
+  });
+
+  testWidgets('Home investments card labels market, unrealized, and realized + dividends',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHousehold();
+    repo.seedPortfolio(
+      shares: 10,
+      averageCostPerShare: 100,
+      quotePrice: 150,
+      dividendAmount: 25,
+    );
+
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FinanceRepository>.value(
+        value: repo,
+        child: const MaterialApp(home: AppShell()),
+      ),
+    );
+    await tester.pump();
+
+    await tester.ensureVisible(find.text('Investments'));
+    await tester.pump();
+
+    expect(find.text('1 holding'), findsOneWidget);
+    expect(find.text('Market value'), findsOneWidget);
+    expect(find.text('Unrealized'), findsOneWidget);
+    expect(find.text('Realized + dividends'), findsOneWidget);
+    expect(find.text('Day'), findsNothing);
+
+    expect(repo.portfolio.marketMain, closeTo(1500, 0.01));
+    expect(repo.portfolio.unrealizedPlMain, closeTo(500, 0.01));
+    expect(
+      repo.portfolio.realizedPlMain + repo.portfolio.dividendMain,
+      closeTo(25, 0.01),
+    );
+
+    final sums = tester.widgetList<MoneyText>(find.byType(MoneyText)).toList();
+    expect(
+      sums.any((w) => !w.signed && (w.amount - 1500).abs() < 0.01),
+      isTrue,
+    );
+    expect(
+      sums.any((w) => w.signed && (w.amount - 500).abs() < 0.01),
+      isTrue,
+    );
+    expect(
+      sums.any((w) => w.signed && (w.amount - 25).abs() < 0.01),
+      isTrue,
+    );
+  });
+
+  testWidgets('Home investments empty state has no portfolio sum labels',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHousehold();
+
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FinanceRepository>.value(
+        value: repo,
+        child: const MaterialApp(home: AppShell()),
+      ),
+    );
+    await tester.pump();
+
+    await tester.ensureVisible(find.text('Investments'));
+    await tester.pump();
+
+    expect(find.text('Market value'), findsNothing);
+    expect(find.text('Unrealized'), findsNothing);
+    expect(find.text('Realized + dividends'), findsNothing);
+    expect(
+      find.textContaining('Add lots on the Invest tab'),
+      findsOneWidget,
+    );
   });
 }

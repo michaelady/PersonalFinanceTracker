@@ -33,6 +33,16 @@ class MemoryStoreRepo extends FinanceRepository {
   late HouseholdProfile you;
   late InvestmentHolding apple;
   late InvestmentHolding microsoft;
+  final refreshForceFlags = <bool>[];
+
+  @override
+  Future<void> refreshQuotes({
+    Iterable<String>? symbols,
+    QuoteHistoryRange range = QuoteHistoryRange.oneMonth,
+    bool force = false,
+  }) async {
+    refreshForceFlags.add(force);
+  }
 
   Future<void> seedHoldings({
     bool withHistory = true,
@@ -543,5 +553,59 @@ void main() {
       performanceEmptyCopy(hasLastPrice: false),
       contains('Pull to refresh when online'),
     );
+  });
+
+  testWidgets('portfolio card force-refreshes when last quotes are older than 5 minutes',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHoldings();
+    final stale = DateTime.now().toUtc().subtract(const Duration(minutes: 6));
+    repo.quotes = {
+      for (final e in repo.quotes.entries)
+        e.key: e.value.copyWith(fetchedAt: stale),
+    };
+    repo.notifyListeners();
+    await pumpInvestments(tester, repo);
+
+    expect(repo.refreshForceFlags, [true]);
+    expect(find.byKey(const Key('toggle-allocation')), findsOneWidget);
+    expect(find.byKey(ValueKey('allocation-${repo.apple.id}')), findsNothing);
+  });
+
+  testWidgets('portfolio card does not auto-refresh fresh quotes or spam resume',
+      (tester) async {
+    final repo = MemoryStoreRepo();
+    await repo.seedHoldings();
+    await pumpInvestments(tester, repo);
+    expect(repo.refreshForceFlags, isEmpty);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(repo.refreshForceFlags, isEmpty);
+
+    final stale = DateTime.now().toUtc().subtract(const Duration(minutes: 6));
+    repo.quotes = {
+      for (final e in repo.quotes.entries)
+        e.key: e.value.copyWith(fetchedAt: stale),
+    };
+    repo.quotesRefreshing = true;
+    repo.notifyListeners();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(repo.refreshForceFlags, isEmpty);
+
+    repo.quotesRefreshing = false;
+    repo.notifyListeners();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(repo.refreshForceFlags, [true]);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(repo.refreshForceFlags, [true]);
   });
 }

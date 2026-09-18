@@ -232,4 +232,94 @@ void main() {
     await repo.refreshQuotes(force: true);
     expect(client.calls, ['VTI', 'VTI']);
   });
+
+  test('maybeAutoRefreshQuotes force-refreshes when last success is older than 5 minutes',
+      () async {
+    final client = _RecordingQuoteClient();
+    SharedPreferences.setMockInitialValues({});
+    final repo = FinanceRepository(
+      refreshRatesOnInit: false,
+      quoteClient: client,
+    );
+    await repo.init();
+    final you = repo.profiles.first;
+    repo.settings = repo.settings.copyWith(onboardingComplete: true);
+    repo.rates = const [CurrencyRate(code: 'USD', rateToMain: 1)];
+    repo.holdings = [
+      InvestmentHolding.create(
+        ticker: 'VTI',
+        displayName: 'Vanguard',
+        shares: 10,
+        averageCostPerShare: 200,
+        currencyCode: 'USD',
+        ownerProfileId: you.id,
+        visibility: VisibilityScope.shared,
+      ),
+    ];
+    final now = DateTime.utc(2026, 9, 18, 12);
+    repo.quotes = {
+      'VTI': CachedQuote(
+        symbol: 'VTI',
+        price: 200,
+        currency: 'USD',
+        fetchedAt: now.subtract(const Duration(minutes: 6)),
+        source: 'test',
+      ),
+    };
+
+    await repo.maybeAutoRefreshQuotes(now: now);
+    expect(client.calls, ['VTI']);
+    expect(repo.quotesAutoRefreshAttemptedAt, now);
+
+    await repo.maybeAutoRefreshQuotes(now: now.add(const Duration(seconds: 30)));
+    expect(client.calls, ['VTI']);
+  });
+
+  test('maybeAutoRefreshQuotes skips a fresh book and an in-flight refresh',
+      () async {
+    final client = _RecordingQuoteClient();
+    SharedPreferences.setMockInitialValues({});
+    final repo = FinanceRepository(
+      refreshRatesOnInit: false,
+      quoteClient: client,
+    );
+    await repo.init();
+    final you = repo.profiles.first;
+    repo.settings = repo.settings.copyWith(onboardingComplete: true);
+    repo.rates = const [CurrencyRate(code: 'USD', rateToMain: 1)];
+    repo.holdings = [
+      InvestmentHolding.create(
+        ticker: 'VTI',
+        displayName: 'Vanguard',
+        shares: 10,
+        averageCostPerShare: 200,
+        currencyCode: 'USD',
+        ownerProfileId: you.id,
+        visibility: VisibilityScope.shared,
+      ),
+    ];
+    final now = DateTime.utc(2026, 9, 18, 12);
+    repo.quotes = {
+      'VTI': CachedQuote(
+        symbol: 'VTI',
+        price: 200,
+        currency: 'USD',
+        fetchedAt: now.subtract(const Duration(minutes: 2)),
+        source: 'test',
+      ),
+    };
+
+    await repo.maybeAutoRefreshQuotes(now: now);
+    expect(client.calls, isEmpty);
+
+    repo.quotes = {
+      'VTI': repo.quotes['VTI']!.copyWith(
+        fetchedAt: now.subtract(const Duration(minutes: 10)),
+      ),
+    };
+    repo.quotesRefreshing = true;
+    await repo.maybeAutoRefreshQuotes(now: now);
+    expect(client.calls, isEmpty);
+    expect(repo.quotesAutoRefreshAttemptedAt, isNull);
+  });
 }

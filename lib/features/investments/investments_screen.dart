@@ -104,7 +104,8 @@ class InvestmentsScreen extends StatefulWidget {
   State<InvestmentsScreen> createState() => _InvestmentsScreenState();
 }
 
-class _InvestmentsScreenState extends State<InvestmentsScreen> {
+class _InvestmentsScreenState extends State<InvestmentsScreen>
+    with WidgetsBindingObserver {
   QuoteHistoryRange _range = QuoteHistoryRange.oneMonth;
   String? _chartHoldingId;
   var _allocationExpanded = false;
@@ -115,14 +116,34 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return;
+    _scheduleQuoteAutoRefresh();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _scheduleQuoteAutoRefresh();
+    }
+  }
+
+  void _scheduleQuoteAutoRefresh() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<FinanceRepository>().refreshQuotes();
+      context.read<FinanceRepository>().maybeAutoRefreshQuotes();
     });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scrollController.dispose();
     super.dispose();
   }

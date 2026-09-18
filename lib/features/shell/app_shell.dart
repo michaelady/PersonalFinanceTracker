@@ -131,6 +131,7 @@ class _AppShellState extends State<AppShell> {
               )
             : _index == 5
             ? FloatingActionButton.extended(
+                key: const Key('add-holding-fab'),
                 onPressed: () => InvestmentsScreen.showEditor(context, repo),
                 backgroundColor: ZenthoColors.tealDeep,
                 foregroundColor: Colors.white,

@@ -179,6 +179,10 @@ VAN.F,174.54,2026/09/02,16:41 CEST,-0.96,173.6,176.04,171.96,231,20251020,102.0,
     await pumpInvestments(tester, repo);
 
     expect(find.text('No holdings yet'), findsNothing);
+    expect(find.byKey(const Key('toggle-holdings')), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('toggle-holdings')));
+    await tester.tap(find.byKey(const Key('toggle-holdings')));
+    await tester.pumpAndSettle();
     expect(find.textContaining('RKLB'), findsWidgets);
     expect(find.textContaining('VAN.F'), findsWidgets);
     expect(

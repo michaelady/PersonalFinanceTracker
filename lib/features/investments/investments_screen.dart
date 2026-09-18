@@ -32,6 +32,11 @@ String performanceTwoPointCaption(QuoteHistoryRange range) {
 class InvestmentsScreen extends StatefulWidget {
   const InvestmentsScreen({super.key});
 
+  /// Bottom inset so Show/Hide controls stay above the shell **+ Holding** FAB.
+  /// 56 is the Material extended-FAB height; 16 is extra air above the margin.
+  static const double fabClearance =
+      kFloatingActionButtonMargin + 56 + 16;
+
   static Future<void> showEditor(
     BuildContext context,
     FinanceRepository repo, {
@@ -109,6 +114,7 @@ class _InvestmentsScreenState extends State<InvestmentsScreen>
   QuoteHistoryRange _range = QuoteHistoryRange.oneMonth;
   String? _chartHoldingId;
   var _allocationExpanded = false;
+  var _holdingsExpanded = false;
   var _transactionsExpanded = false;
   final _scrollController = ScrollController();
   final _chartKey = GlobalKey();
@@ -186,10 +192,17 @@ class _InvestmentsScreenState extends State<InvestmentsScreen>
         : null;
 
     return AppScaffoldBody(
+      padding: const EdgeInsets.fromLTRB(
+        20,
+        8,
+        20,
+        InvestmentsScreen.fabClearance,
+      ),
       child: RefreshIndicator(
         onRefresh: () => repo.refreshQuotes(force: true, range: _range),
         child: ListView(
           controller: _scrollController,
+          padding: const EdgeInsets.only(bottom: 8),
           children: [
             Text(
               'Investments',
@@ -263,25 +276,30 @@ class _InvestmentsScreenState extends State<InvestmentsScreen>
                 ],
               ),
               const SizedBox(height: 24),
-              Text(
-                'Holdings',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              ...holdings.map(
-                (v) => _HoldingTile(
-                  valuation: v,
-                  currency: currency,
-                  selected: chartHoldingId == v.holding.id,
-                  onTap: () => _toggleChartHolding(v.holding.id),
-                  onEdit: () => _editHolding(repo, v.holding),
-                  onAddTransaction: () =>
-                      InvestmentsScreen.showShareTransactionEditor(
-                    context,
-                    repo,
-                    holding: v.holding,
-                  ),
+              _CollapsibleDetails(
+                toggleKey: const Key('toggle-holdings'),
+                labelKey: const Key('holdings-toggle-label'),
+                title: 'Holdings',
+                expanded: _holdingsExpanded,
+                onToggle: () => setState(
+                  () => _holdingsExpanded = !_holdingsExpanded,
                 ),
+                children: [
+                  for (final v in holdings)
+                    _HoldingTile(
+                      valuation: v,
+                      currency: currency,
+                      selected: chartHoldingId == v.holding.id,
+                      onTap: () => _toggleChartHolding(v.holding.id),
+                      onEdit: () => _editHolding(repo, v.holding),
+                      onAddTransaction: () =>
+                          InvestmentsScreen.showShareTransactionEditor(
+                        context,
+                        repo,
+                        holding: v.holding,
+                      ),
+                    ),
+                ],
               ),
               const SizedBox(height: 24),
               _CollapsibleDetails(
